@@ -20,6 +20,9 @@ BRAND_COLORS = {
     "line": "#D9E7EC",
 }
 
+SENDER_FALLBACK_NAME = "Erik"
+SENDER_FALLBACK_EMAIL = "erik@watercooler.org"
+
 SMTP_ENV_VARS = [
     "SENDER_EMAIL",
     "SENDER_NAME",
@@ -56,3 +59,4 @@ HTML_TEMPLATE = """\
 Erik<br>
 Water Cooler at Pegasus Park | Pegasus Park</p>
 """
+
