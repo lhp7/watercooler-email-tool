@@ -1,4 +1,4 @@
-"""Editable settings for the Water Cooler CEO email tool."""
+"""Editable settings for the Water Cooler CEO email draft tool."""
 
 from __future__ import annotations
 
@@ -20,16 +20,8 @@ BRAND_COLORS = {
     "line": "#D9E7EC",
 }
 
-SENDER_FALLBACK_NAME = "Erik"
-SENDER_FALLBACK_EMAIL = "erik@watercooler.org"
-
-SMTP_ENV_VARS = [
-    "SENDER_EMAIL",
-    "SENDER_NAME",
-    "SMTP_HOST",
-    "SMTP_PORT",
-    "SMTP_PASSWORD",
-]
+DRAFT_SENDER_NAME = "Erik"
+DRAFT_SENDER_EMAIL = "erik@watercooler.org"
 
 SUBJECT_TEMPLATE = "Your Pegasus Park Campus Engagement Report - {period}"
 

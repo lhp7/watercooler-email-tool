@@ -1,8 +1,6 @@
 __pycache__/
 *.py[cod]
 .venv/
-.env
 .DS_Store
 generated_emails/
 send_logs/
-

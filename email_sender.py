@@ -1,14 +1,10 @@
-"""Recipient validation, report matching, email drafting, and delivery helpers."""
+"""Recipient validation, report matching, and email draft helpers."""
 
 from __future__ import annotations
 
-import csv
-import os
 import re
-import smtplib
 from dataclasses import dataclass
 from datetime import datetime
-from email import policy
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from io import BytesIO, StringIO
@@ -20,12 +16,11 @@ import pandas as pd
 
 from config import (
     DEFAULT_PERIOD,
+    DRAFT_SENDER_EMAIL,
+    DRAFT_SENDER_NAME,
     HTML_TEMPLATE,
     MATCH_THRESHOLD,
     MAX_RECIPIENTS,
-    SENDER_FALLBACK_EMAIL,
-    SENDER_FALLBACK_NAME,
-    SMTP_ENV_VARS,
     SUBJECT_TEMPLATE,
     TEXT_TEMPLATE,
 )
@@ -41,57 +36,6 @@ class ReportFile:
     display_name: str
     normalized_name: str
     content: bytes
-
-
-@dataclass(frozen=True)
-class SmtpSettings:
-    sender_email: str
-    sender_name: str
-    smtp_host: str
-    smtp_port: int
-    smtp_password: str
-
-
-def load_dotenv_file(path: str | Path = ".env") -> None:
-    """Load .env values without requiring python-dotenv at import time."""
-    try:
-        from dotenv import load_dotenv
-
-        load_dotenv(path)
-        return
-    except Exception:
-        pass
-
-    env_path = Path(path)
-    if not env_path.exists():
-        return
-    for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
-
-def get_smtp_settings(path: str | Path = ".env") -> tuple[SmtpSettings | None, list[str]]:
-    load_dotenv_file(path)
-    missing = [name for name in SMTP_ENV_VARS if not os.getenv(name)]
-    if missing:
-        return None, missing
-    try:
-        port = int(os.environ["SMTP_PORT"])
-    except ValueError:
-        return None, ["SMTP_PORT must be a number"]
-    return (
-        SmtpSettings(
-            sender_email=os.environ["SENDER_EMAIL"],
-            sender_name=os.environ["SENDER_NAME"],
-            smtp_host=os.environ["SMTP_HOST"],
-            smtp_port=port,
-            smtp_password=os.environ["SMTP_PASSWORD"],
-        ),
-        [],
-    )
 
 
 def normalize_org_name(value: object) -> str:
@@ -218,7 +162,7 @@ def build_match_table(recipients: pd.DataFrame, reports: list[ReportFile]) -> pd
         match = match_report(recipient["org_name"], reports)
         rows.append(
             {
-                "send": match["status"] == "Ready",
+                "include": match["status"] == "Ready",
                 "first_name": recipient["first_name"],
                 "last_name": recipient["last_name"],
                 "recipient_name": recipient["recipient_name"],
@@ -242,10 +186,6 @@ def render_text_body(first_name: str, org_name: str, period: str) -> str:
     return TEXT_TEMPLATE.format(first_name=first_name, org_name=org_name, period=period)
 
 
-def render_html_body(first_name: str, org_name: str, period: str) -> str:
-    return HTML_TEMPLATE.format(first_name=first_name, org_name=org_name, period=period)
-
-
 def text_to_html(text: str) -> str:
     paragraphs = [part.strip().replace("\n", "<br>") for part in text.split("\n\n") if part.strip()]
     return "\n".join(f"<p>{paragraph}</p>" for paragraph in paragraphs)
@@ -262,13 +202,13 @@ def build_email_message(
     attachment_filename: str,
     attachment_content: bytes,
 ) -> EmailMessage:
-    message = EmailMessage(policy=policy.SMTP)
+    message = EmailMessage()
     message["From"] = formataddr((sender_name, sender_email))
     message["To"] = formataddr((recipient_name, recipient_email))
     message["Subject"] = subject
     message["Message-ID"] = make_msgid(domain=sender_email.split("@")[-1])
-    message.set_content(text_body, charset="utf-8", cte="8bit")
-    message.add_alternative(html_body, subtype="html", charset="utf-8", cte="8bit")
+    message.set_content(text_body, charset="utf-8")
+    message.add_alternative(html_body, subtype="html", charset="utf-8")
     message.add_attachment(
         attachment_content,
         maintype="application",
@@ -293,24 +233,26 @@ def build_log_row(row: dict, report_filename: str, status: str) -> dict:
     }
 
 
-def rows_to_send(edited_rows: pd.DataFrame) -> pd.DataFrame:
+def rows_to_generate(edited_rows: pd.DataFrame) -> pd.DataFrame:
     if edited_rows.empty:
         return edited_rows
-    return edited_rows[(edited_rows["send"] == True) & (edited_rows["status"] == "Ready")].copy()
+    return edited_rows[
+        (edited_rows["include"] == True) & (edited_rows["status"] == "Ready")
+    ].copy()
 
 
 def generate_eml_zip(
     edited_rows: pd.DataFrame,
     reports: list[ReportFile],
     period: str,
-    sender_email: str = SENDER_FALLBACK_EMAIL,
-    sender_name: str = SENDER_FALLBACK_NAME,
+    sender_email: str = DRAFT_SENDER_EMAIL,
+    sender_name: str = DRAFT_SENDER_NAME,
 ) -> tuple[bytes, pd.DataFrame]:
     report_lookup = {report.filename: report for report in reports}
     log_rows = []
     output = BytesIO()
     with ZipFile(output, "w", ZIP_DEFLATED) as zip_file:
-        for _, row in rows_to_send(edited_rows).iterrows():
+        for _, row in rows_to_generate(edited_rows).iterrows():
             row_dict = row.to_dict()
             report = report_lookup.get(row["matched_report"])
             if report is None:
@@ -329,53 +271,15 @@ def generate_eml_zip(
                 attachment_filename=report.filename,
                 attachment_content=report.content,
             )
-            filename = f"{normalize_org_name(row['org_name']).replace(' ', '_')}_{normalize_org_name(row['recipient_name']).replace(' ', '_')}.eml"
-            zip_file.writestr(filename, message.as_bytes(policy=policy.SMTP))
-            log_rows.append(build_log_row(row_dict, report.filename, "Generated .eml"))
+            org_slug = normalize_org_name(row["org_name"]).replace(" ", "_")
+            name_slug = normalize_org_name(row["recipient_name"]).replace(" ", "_")
+            filename = f"{org_slug}_{name_slug}.eml"
+            zip_file.writestr(filename, message.as_bytes())
+            log_rows.append(build_log_row(row_dict, report.filename, "Draft generated"))
     return output.getvalue(), pd.DataFrame(log_rows)
-
-
-def send_emails_via_smtp(
-    edited_rows: pd.DataFrame,
-    reports: list[ReportFile],
-    settings: SmtpSettings,
-    period: str,
-) -> pd.DataFrame:
-    report_lookup = {report.filename: report for report in reports}
-    log_rows = []
-    selected_rows = rows_to_send(edited_rows)
-
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=30) as smtp:
-        smtp.starttls()
-        smtp.login(settings.sender_email, settings.smtp_password)
-        for _, row in selected_rows.iterrows():
-            row_dict = row.to_dict()
-            report = report_lookup.get(row["matched_report"])
-            if report is None:
-                log_rows.append(build_log_row(row_dict, "", "Skipped - missing report"))
-                continue
-            try:
-                body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
-                html = text_to_html(body)
-                message = build_email_message(
-                    sender_email=settings.sender_email,
-                    sender_name=settings.sender_name,
-                    recipient_email=row["email"],
-                    recipient_name=row["recipient_name"],
-                    subject=row["subject"],
-                    text_body=body,
-                    html_body=html,
-                    attachment_filename=report.filename,
-                    attachment_content=report.content,
-                )
-                smtp.send_message(message)
-                log_rows.append(build_log_row(row_dict, report.filename, "Sent"))
-            except Exception as exc:
-                log_rows.append(build_log_row(row_dict, report.filename, f"Failed - {exc}"))
-    return pd.DataFrame(log_rows)
 
 
 def log_to_csv(log_df: pd.DataFrame) -> bytes:
     output = StringIO()
-    log_df.to_csv(output, index=False, quoting=csv.QUOTE_MINIMAL)
+    log_df.to_csv(output, index=False)
     return output.getvalue().encode("utf-8")

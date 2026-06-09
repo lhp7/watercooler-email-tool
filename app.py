@@ -1,23 +1,19 @@
-"""Streamlit UI for sending Water Cooler CEO report emails."""
+"""Streamlit UI for preparing Water Cooler CEO report email drafts."""
 
 from __future__ import annotations
-
-from io import BytesIO
 
 import pandas as pd
 import streamlit as st
 
-from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS, SENDER_FALLBACK_EMAIL, SENDER_FALLBACK_NAME
+from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS
 from email_sender import (
     build_match_table,
     extract_reports_from_zip,
     generate_eml_zip,
-    get_smtp_settings,
     log_to_csv,
     read_recipients_csv,
     render_subject,
     render_text_body,
-    send_emails_via_smtp,
     validate_recipients,
 )
 
@@ -89,7 +85,7 @@ st.markdown(
     """
     <div class="wc-header">
       <h1>Water Cooler CEO Email Tool</h1>
-      <p>Match engagement reports, review draft emails, and send or export .eml files.</p>
+      <p>Match engagement reports, review each email, and download ready-to-send draft files.</p>
     </div>
     """,
     unsafe_allow_html=True,
@@ -99,14 +95,6 @@ with st.sidebar:
     st.header("Batch settings")
     period = st.text_input("Reporting period", value=DEFAULT_PERIOD)
     st.caption("This appears in the email subject and body.")
-    st.divider()
-    st.subheader("SMTP status")
-    smtp_settings, smtp_missing = get_smtp_settings()
-    if smtp_missing:
-        st.warning("SMTP not ready. Use .eml mode or add the missing .env values.")
-        st.caption(", ".join(smtp_missing))
-    else:
-        st.success(f"SMTP ready for {smtp_settings.sender_email}")
 
 report_zip = st.file_uploader("Upload report ZIP from the keycard reporting app", type=["zip"])
 
@@ -127,7 +115,7 @@ if not reports:
 report_cols = st.columns(3)
 report_cols[0].metric("PDF reports found", len(reports))
 report_cols[1].metric("Max recipients", MAX_RECIPIENTS)
-report_cols[2].metric("Sending mode", "SMTP or .eml")
+report_cols[2].metric("Output", "Email draft ZIP")
 
 st.subheader("Recipients")
 input_mode = st.radio("Recipient input method", ["Upload CSV", "Manual entry"], horizontal=True)
@@ -192,16 +180,16 @@ ready_count = int((match_table["status"] == "Ready").sum())
 blocked_count = len(match_table) - ready_count
 status_cols = st.columns(3)
 status_cols[0].metric("Recipients loaded", len(match_table))
-status_cols[1].metric("Ready to send", ready_count)
+status_cols[1].metric("Ready drafts", ready_count)
 status_cols[2].metric("Blocked", blocked_count)
 
 if blocked_count:
-    st.error("Some recipients do not have a matched report. Fix the org name before sending.")
+    st.error("Some recipients do not have a matched report. Fix the org name before building drafts.")
 
 st.subheader("Email draft review")
-st.caption("Edit subject or body here before generating .eml files or sending via SMTP.")
+st.caption("Edit subject or body here before building the draft email files.")
 editable_columns = [
-    "send",
+    "include",
     "recipient_name",
     "email",
     "org_name",
@@ -218,7 +206,7 @@ edited = st.data_editor(
     height=520,
     disabled=["recipient_name", "email", "org_name", "matched_report", "match_score", "status"],
     column_config={
-        "send": st.column_config.CheckboxColumn("Send", help="Only ready rows can be sent."),
+        "include": st.column_config.CheckboxColumn("Include", help="Only ready rows can be included."),
         "recipient_name": st.column_config.TextColumn("Recipient", width="medium"),
         "email": st.column_config.TextColumn("Email", width="medium"),
         "org_name": st.column_config.TextColumn("Organization", width="large"),
@@ -232,51 +220,37 @@ edited = st.data_editor(
 
 details = match_table[["first_name", "last_name"]].copy()
 edited = pd.concat([details, edited], axis=1)
-edited.loc[edited["status"] != "Ready", "send"] = False
+edited.loc[edited["status"] != "Ready", "include"] = False
 
-selected_ready = edited[(edited["send"] == True) & (edited["status"] == "Ready")]
-st.caption(f"{len(selected_ready)} ready email(s) selected.")
+selected_ready = edited[(edited["include"] == True) & (edited["status"] == "Ready")]
+st.caption(f"{len(selected_ready)} ready draft(s) selected.")
 
-action_cols = st.columns(2)
+confirm = st.checkbox("I reviewed every selected email and attachment.")
+build_disabled = selected_ready.empty or not confirm
+if st.button("Build reviewed email draft ZIP", use_container_width=True, disabled=build_disabled):
+    with st.spinner("Building email draft files..."):
+        eml_zip, log_df = generate_eml_zip(edited, reports, period)
+    st.session_state["eml_zip"] = eml_zip
+    st.session_state["draft_log"] = log_df
+    st.success("Draft email files are ready to download.")
 
-with action_cols[0]:
-    if st.button("Build .eml ZIP", use_container_width=True, disabled=selected_ready.empty):
-        eml_zip, log_df = generate_eml_zip(
-            edited,
-            reports,
-            period,
-            sender_email=smtp_settings.sender_email if smtp_settings else SENDER_FALLBACK_EMAIL,
-            sender_name=smtp_settings.sender_name if smtp_settings else SENDER_FALLBACK_NAME,
-        )
-        st.session_state["eml_zip"] = eml_zip
-        st.session_state["send_log"] = log_df
+if "eml_zip" in st.session_state:
+    st.download_button(
+        "Download reviewed email draft ZIP",
+        data=st.session_state["eml_zip"],
+        file_name="water_cooler_email_drafts.zip",
+        mime="application/zip",
+        use_container_width=True,
+    )
 
-    if "eml_zip" in st.session_state:
-        st.download_button(
-            "Download .eml ZIP",
-            data=st.session_state["eml_zip"],
-            file_name="water_cooler_email_drafts.zip",
-            mime="application/zip",
-            use_container_width=True,
-        )
-
-with action_cols[1]:
-    confirm = st.checkbox("I reviewed every selected email and attachment.")
-    send_disabled = selected_ready.empty or bool(smtp_missing) or not confirm
-    if st.button("Send selected via SMTP", use_container_width=True, disabled=send_disabled):
-        with st.spinner("Sending emails one at a time..."):
-            log_df = send_emails_via_smtp(edited, reports, smtp_settings, period)
-        st.session_state["send_log"] = log_df
-        st.success("SMTP send attempt complete. Review the log below.")
-
-if "send_log" in st.session_state:
-    st.subheader("Send log")
-    log_df = st.session_state["send_log"]
+if "draft_log" in st.session_state:
+    st.subheader("Draft log")
+    log_df = st.session_state["draft_log"]
     st.dataframe(log_df, use_container_width=True, hide_index=True)
     st.download_button(
-        "Download send log CSV",
+        "Download draft log CSV",
         data=log_to_csv(log_df),
-        file_name="water_cooler_send_log.csv",
+        file_name="water_cooler_draft_log.csv",
         mime="text/csv",
         use_container_width=True,
     )
