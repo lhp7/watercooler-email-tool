@@ -8,6 +8,7 @@ import re
 import smtplib
 from dataclasses import dataclass
 from datetime import datetime
+from email import policy
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from io import BytesIO, StringIO
@@ -261,13 +262,13 @@ def build_email_message(
     attachment_filename: str,
     attachment_content: bytes,
 ) -> EmailMessage:
-    message = EmailMessage()
+    message = EmailMessage(policy=policy.SMTP)
     message["From"] = formataddr((sender_name, sender_email))
     message["To"] = formataddr((recipient_name, recipient_email))
     message["Subject"] = subject
     message["Message-ID"] = make_msgid(domain=sender_email.split("@")[-1])
-    message.set_content(text_body)
-    message.add_alternative(html_body, subtype="html")
+    message.set_content(text_body, charset="utf-8", cte="8bit")
+    message.add_alternative(html_body, subtype="html", charset="utf-8", cte="8bit")
     message.add_attachment(
         attachment_content,
         maintype="application",
@@ -329,7 +330,7 @@ def generate_eml_zip(
                 attachment_content=report.content,
             )
             filename = f"{normalize_org_name(row['org_name']).replace(' ', '_')}_{normalize_org_name(row['recipient_name']).replace(' ', '_')}.eml"
-            zip_file.writestr(filename, message.as_bytes())
+            zip_file.writestr(filename, message.as_bytes(policy=policy.SMTP))
             log_rows.append(build_log_row(row_dict, report.filename, "Generated .eml"))
     return output.getvalue(), pd.DataFrame(log_rows)
 
@@ -378,4 +379,3 @@ def log_to_csv(log_df: pd.DataFrame) -> bytes:
     output = StringIO()
     log_df.to_csv(output, index=False, quoting=csv.QUOTE_MINIMAL)
     return output.getvalue().encode("utf-8")
-
