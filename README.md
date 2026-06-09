@@ -9,8 +9,8 @@ Standalone Streamlit app for drafting and sending Water Cooler at Pegasus Park e
 - Fuzzy-matches each recipient organization to the correct PDF report.
 - Blocks sending for unmatched organizations.
 - Shows an editable preview of every email before anything is sent.
-- Sends emails through SMTP or exports `.eml` draft files in a ZIP.
-- Produces a downloadable send/generation log CSV.
+- Sends selected emails directly through SMTP.
+- Produces a downloadable send log CSV.
 
 ## Files
 
@@ -51,19 +51,7 @@ Sarah,Johnson,sarah@orgname.org,Texas Trees Foundation
 
 The `org_name` should match the organization name used in the PDF reports. The app uses fuzzy matching, so small spacing or capitalization differences are usually okay.
 
-## Sending Modes
-
-### Mode A: Download `.eml` Drafts
-
-This mode does not require email credentials.
-
-1. Upload the report ZIP.
-2. Upload or enter recipients.
-3. Review/edit each email.
-4. Click `Build .eml ZIP`.
-5. Download and open the `.eml` files in Outlook, Gmail, or another email client.
-
-### Mode B: Send Via SMTP
+## Sending Emails
 
 Create a local `.env` file by copying `.env.example`:
 
@@ -102,7 +90,6 @@ SMTP_PORT=587
 
 Edit `config.py` to change:
 
-- Sender fallback name/email
 - Default reporting period
 - Subject line
 - Plain-text body
@@ -114,4 +101,3 @@ Available template variables:
 - `{first_name}`
 - `{org_name}`
 - `{period}`
-

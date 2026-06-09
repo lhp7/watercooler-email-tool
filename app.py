@@ -2,16 +2,13 @@
 
 from __future__ import annotations
 
-from io import BytesIO
-
 import pandas as pd
 import streamlit as st
 
-from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS, SENDER_FALLBACK_EMAIL, SENDER_FALLBACK_NAME
+from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS, SMTP_ENV_VARS
 from email_sender import (
     build_match_table,
     extract_reports_from_zip,
-    generate_eml_zip,
     get_smtp_settings,
     log_to_csv,
     read_recipients_csv,
@@ -89,11 +86,20 @@ st.markdown(
     """
     <div class="wc-header">
       <h1>Water Cooler CEO Email Tool</h1>
-      <p>Match engagement reports, review draft emails, and send or export .eml files.</p>
+      <p>Match engagement reports, review each email, then send directly.</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
+
+try:
+    streamlit_secrets = {
+        name: st.secrets[name]
+        for name in SMTP_ENV_VARS
+        if name in st.secrets
+    }
+except Exception:
+    streamlit_secrets = {}
 
 with st.sidebar:
     st.header("Batch settings")
@@ -101,9 +107,9 @@ with st.sidebar:
     st.caption("This appears in the email subject and body.")
     st.divider()
     st.subheader("SMTP status")
-    smtp_settings, smtp_missing = get_smtp_settings()
+    smtp_settings, smtp_missing = get_smtp_settings(secrets=streamlit_secrets)
     if smtp_missing:
-        st.warning("SMTP not ready. Use .eml mode or add the missing .env values.")
+        st.warning("SMTP is not ready yet. Add the missing .env values locally or app secrets in Streamlit.")
         st.caption(", ".join(smtp_missing))
     else:
         st.success(f"SMTP ready for {smtp_settings.sender_email}")
@@ -127,7 +133,7 @@ if not reports:
 report_cols = st.columns(3)
 report_cols[0].metric("PDF reports found", len(reports))
 report_cols[1].metric("Max recipients", MAX_RECIPIENTS)
-report_cols[2].metric("Sending mode", "SMTP or .eml")
+report_cols[2].metric("Send method", "Direct email")
 
 st.subheader("Recipients")
 input_mode = st.radio("Recipient input method", ["Upload CSV", "Manual entry"], horizontal=True)
@@ -199,7 +205,7 @@ if blocked_count:
     st.error("Some recipients do not have a matched report. Fix the org name before sending.")
 
 st.subheader("Email draft review")
-st.caption("Edit subject or body here before generating .eml files or sending via SMTP.")
+st.caption("Edit subject or body here before sending.")
 editable_columns = [
     "send",
     "recipient_name",
@@ -237,37 +243,15 @@ edited.loc[edited["status"] != "Ready", "send"] = False
 selected_ready = edited[(edited["send"] == True) & (edited["status"] == "Ready")]
 st.caption(f"{len(selected_ready)} ready email(s) selected.")
 
-action_cols = st.columns(2)
-
-with action_cols[0]:
-    if st.button("Build .eml ZIP", use_container_width=True, disabled=selected_ready.empty):
-        eml_zip, log_df = generate_eml_zip(
-            edited,
-            reports,
-            period,
-            sender_email=smtp_settings.sender_email if smtp_settings else SENDER_FALLBACK_EMAIL,
-            sender_name=smtp_settings.sender_name if smtp_settings else SENDER_FALLBACK_NAME,
-        )
-        st.session_state["eml_zip"] = eml_zip
-        st.session_state["send_log"] = log_df
-
-    if "eml_zip" in st.session_state:
-        st.download_button(
-            "Download .eml ZIP",
-            data=st.session_state["eml_zip"],
-            file_name="water_cooler_email_drafts.zip",
-            mime="application/zip",
-            use_container_width=True,
-        )
-
-with action_cols[1]:
-    confirm = st.checkbox("I reviewed every selected email and attachment.")
-    send_disabled = selected_ready.empty or bool(smtp_missing) or not confirm
-    if st.button("Send selected via SMTP", use_container_width=True, disabled=send_disabled):
-        with st.spinner("Sending emails one at a time..."):
-            log_df = send_emails_via_smtp(edited, reports, smtp_settings, period)
-        st.session_state["send_log"] = log_df
-        st.success("SMTP send attempt complete. Review the log below.")
+confirm = st.checkbox("I reviewed every selected email and attachment.")
+send_disabled = selected_ready.empty or bool(smtp_missing) or not confirm
+if smtp_missing:
+    st.info("The send button will unlock after SMTP credentials are configured.")
+if st.button("Send selected emails", use_container_width=True, disabled=send_disabled):
+    with st.spinner("Sending emails one at a time..."):
+        log_df = send_emails_via_smtp(edited, reports, smtp_settings, period)
+    st.session_state["send_log"] = log_df
+    st.success("Send attempt complete. Review the log below.")
 
 if "send_log" in st.session_state:
     st.subheader("Send log")
@@ -280,4 +264,3 @@ if "send_log" in st.session_state:
         mime="text/csv",
         use_container_width=True,
     )
-
