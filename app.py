@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import base64
+import html
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -78,6 +82,15 @@ def styled_status(df: pd.DataFrame):
         ]
 
     return df.style.apply(row_style, axis=1)
+
+
+def pdf_anchor(report) -> str:
+    filename = html.escape(Path(report.filename).name)
+    encoded = base64.b64encode(report.content).decode("ascii")
+    return (
+        f'<a href="data:application/pdf;base64,{encoded}" '
+        f'download="{filename}" target="_blank">Open attached PDF: {filename}</a>'
+    )
 
 
 st.markdown(css(), unsafe_allow_html=True)
@@ -187,39 +200,70 @@ if blocked_count:
     st.error("Some recipients do not have a matched report. Fix the org name before building drafts.")
 
 st.subheader("Email draft review")
-st.caption("Edit subject or body here before building the draft email files.")
-editable_columns = [
-    "include",
-    "recipient_name",
-    "email",
-    "org_name",
-    "matched_report",
-    "match_score",
-    "status",
-    "subject",
-    "body",
-]
-edited = st.data_editor(
-    match_table[editable_columns],
-    use_container_width=True,
-    hide_index=True,
-    height=520,
-    disabled=["recipient_name", "email", "org_name", "matched_report", "match_score", "status"],
-    column_config={
-        "include": st.column_config.CheckboxColumn("Include", help="Only ready rows can be included."),
-        "recipient_name": st.column_config.TextColumn("Recipient", width="medium"),
-        "email": st.column_config.TextColumn("Email", width="medium"),
-        "org_name": st.column_config.TextColumn("Organization", width="large"),
-        "matched_report": st.column_config.TextColumn("Attached PDF", width="large"),
-        "match_score": st.column_config.NumberColumn("Match score", format="%.1f"),
-        "status": st.column_config.TextColumn("Status"),
-        "subject": st.column_config.TextColumn("Subject", width="large"),
-        "body": st.column_config.TextColumn("Email body", width="large"),
-    },
-)
+st.caption("Review the full draft, edit the subject/body, and open the exact PDF that will be attached.")
 
-details = match_table[["first_name", "last_name"]].copy()
-edited = pd.concat([details, edited], axis=1)
+report_lookup = {report.filename: report for report in reports}
+edited_rows = []
+
+for idx, row in match_table.iterrows():
+    ready = row["status"] == "Ready"
+    with st.container(border=True):
+        title_cols = st.columns([0.8, 2.1, 2.4, 2.7])
+        include = title_cols[0].checkbox(
+            "Include",
+            value=bool(row["include"]) and ready,
+            disabled=not ready,
+            key=f"include_{idx}_{row['email']}",
+        )
+        title_cols[1].markdown(f"**Recipient**  \n{row['recipient_name']}")
+        title_cols[2].markdown(f"**Organization**  \n{row['org_name']}")
+        title_cols[3].markdown(f"**Email**  \n{row['email']}")
+
+        if ready:
+            report = report_lookup.get(row["matched_report"])
+            if report:
+                st.markdown(pdf_anchor(report), unsafe_allow_html=True)
+                st.download_button(
+                    "Download attached PDF",
+                    data=report.content,
+                    file_name=Path(report.filename).name,
+                    mime="application/pdf",
+                    key=f"pdf_download_{idx}_{row['email']}",
+                )
+        else:
+            st.warning("No matched PDF yet. Fix this recipient's organization name before building drafts.")
+
+        subject = st.text_input(
+            "Subject",
+            value=row["subject"],
+            key=f"subject_{idx}_{row['email']}",
+            disabled=not ready,
+        )
+        body = st.text_area(
+            "Email body",
+            value=row["body"],
+            height=320,
+            key=f"body_{idx}_{row['email']}",
+            disabled=not ready,
+        )
+
+    edited_rows.append(
+        {
+            "include": bool(include) and ready,
+            "first_name": row["first_name"],
+            "last_name": row["last_name"],
+            "recipient_name": row["recipient_name"],
+            "email": row["email"],
+            "org_name": row["org_name"],
+            "matched_report": row["matched_report"],
+            "match_score": row["match_score"],
+            "status": row["status"],
+            "subject": subject,
+            "body": body,
+        }
+    )
+
+edited = pd.DataFrame(edited_rows)
 edited.loc[edited["status"] != "Ready", "include"] = False
 
 selected_ready = edited[(edited["include"] == True) & (edited["status"] == "Ready")]
@@ -254,4 +298,3 @@ if "draft_log" in st.session_state:
         mime="text/csv",
         use_container_width=True,
     )
-

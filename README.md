@@ -8,7 +8,8 @@ Standalone Streamlit app for preparing Water Cooler at Pegasus Park engagement r
 - Accepts up to 30 CEO/contact recipients by CSV upload or manual entry.
 - Fuzzy-matches each recipient organization to the correct PDF report.
 - Blocks draft generation for unmatched organizations.
-- Shows an editable preview of every email before any draft file is built.
+- Shows a full editable preview of every email before any draft file is built.
+- Shows a clickable/downloadable link to the exact PDF attached to each draft.
 - Generates `.eml` email draft files with the correct PDF attached.
 - Produces a downloadable draft log CSV.
 
@@ -55,7 +56,7 @@ The `org_name` should match the organization name used in the PDF reports. The a
 1. Upload the report ZIP from the keycard reporting app.
 2. Upload the recipient CSV or enter recipients manually.
 3. Review the matching table and fix any organization names without a matched PDF.
-4. Edit the subject/body if needed.
+4. Open the attached PDF link for each recipient and edit the full subject/body if needed.
 5. Check the final review box.
 6. Click `Build reviewed email draft ZIP`.
 7. Download the ZIP, unzip it, open each `.eml` file, review it in your email client, and send it manually.
