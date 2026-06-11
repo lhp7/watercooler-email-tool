@@ -2,10 +2,6 @@
 
 from __future__ import annotations
 
-import base64
-import html
-from pathlib import Path
-
 import pandas as pd
 import streamlit as st
 
@@ -13,6 +9,7 @@ from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS
 from email_sender import (
     build_match_table,
     extract_reports_from_zip,
+    format_attachment_filename,
     generate_eml_zip,
     log_to_csv,
     read_recipients_csv,
@@ -84,15 +81,6 @@ def styled_status(df: pd.DataFrame):
     return df.style.apply(row_style, axis=1)
 
 
-def pdf_anchor(report) -> str:
-    filename = html.escape(Path(report.filename).name)
-    encoded = base64.b64encode(report.content).decode("ascii")
-    return (
-        f'<a href="data:application/pdf;base64,{encoded}" '
-        f'download="{filename}" target="_blank">Open attached PDF: {filename}</a>'
-    )
-
-
 st.markdown(css(), unsafe_allow_html=True)
 st.markdown(
     """
@@ -128,7 +116,7 @@ if not reports:
 report_cols = st.columns(3)
 report_cols[0].metric("PDF reports found", len(reports))
 report_cols[1].metric("Max recipients", MAX_RECIPIENTS)
-report_cols[2].metric("Output", "Email draft ZIP")
+report_cols[2].metric("Output", "Outlook draft ZIP")
 
 st.subheader("Recipients")
 input_mode = st.radio("Recipient input method", ["Upload CSV", "Manual entry"], horizontal=True)
@@ -200,13 +188,15 @@ if blocked_count:
     st.error("Some recipients do not have a matched report. Fix the org name before building drafts.")
 
 st.subheader("Email draft review")
-st.caption("Review the full draft, edit the subject/body, and open the exact PDF that will be attached.")
+st.caption("Review each draft below. Edit subject, CC, BCC, and body as needed, then download the PDF to verify the attachment.")
 
 report_lookup = {report.filename: report for report in reports}
 edited_rows = []
 
 for idx, row in match_table.iterrows():
     ready = row["status"] == "Ready"
+    cc = row.get("cc", "")
+    bcc = row.get("bcc", "")
     with st.container(border=True):
         title_cols = st.columns([0.8, 2.1, 2.4, 2.7])
         include = title_cols[0].checkbox(
@@ -222,11 +212,10 @@ for idx, row in match_table.iterrows():
         if ready:
             report = report_lookup.get(row["matched_report"])
             if report:
-                st.markdown(pdf_anchor(report), unsafe_allow_html=True)
                 st.download_button(
-                    "Download attached PDF",
+                    f"📎 Download attached PDF: {format_attachment_filename(row['org_name'], period)}",
                     data=report.content,
-                    file_name=Path(report.filename).name,
+                    file_name=format_attachment_filename(row["org_name"], period),
                     mime="application/pdf",
                     key=f"pdf_download_{idx}_{row['email']}",
                 )
@@ -238,6 +227,17 @@ for idx, row in match_table.iterrows():
             value=row["subject"],
             key=f"subject_{idx}_{row['email']}",
             disabled=not ready,
+        )
+        cc_col, bcc_col = st.columns(2)
+        cc = cc_col.text_input(
+            "CC (optional, comma-separated)",
+            value=row.get("cc", ""),
+            key=f"cc_{idx}_{row['email']}",
+        )
+        bcc = bcc_col.text_input(
+            "BCC (optional, comma-separated)",
+            value=row.get("bcc", ""),
+            key=f"bcc_{idx}_{row['email']}",
         )
         body = st.text_area(
             "Email body",
@@ -260,6 +260,8 @@ for idx, row in match_table.iterrows():
             "status": row["status"],
             "subject": subject,
             "body": body,
+            "cc": cc,
+            "bcc": bcc,
         }
     )
 
@@ -272,19 +274,28 @@ st.caption(f"{len(selected_ready)} ready draft(s) selected.")
 confirm = st.checkbox("I reviewed every selected email and attachment.")
 build_disabled = selected_ready.empty or not confirm
 if st.button("Build reviewed email draft ZIP", use_container_width=True, disabled=build_disabled):
-    with st.spinner("Building email draft files..."):
+    with st.spinner("Building Outlook draft files..."):
         eml_zip, log_df = generate_eml_zip(edited, reports, period)
     st.session_state["eml_zip"] = eml_zip
     st.session_state["draft_log"] = log_df
-    st.success("Draft email files are ready to download.")
+    st.success("Outlook draft files are ready to download.")
 
 if "eml_zip" in st.session_state:
     st.download_button(
-        "Download reviewed email draft ZIP",
+        "Download Outlook draft ZIP",
         data=st.session_state["eml_zip"],
-        file_name="water_cooler_email_drafts.zip",
+        file_name="water_cooler_outlook_drafts.zip",
         mime="application/zip",
         use_container_width=True,
+    )
+    st.info(
+        "**How to load these into Outlook Drafts:**\n\n"
+        "1. Unzip the downloaded file\n"
+        "2. Make sure Outlook is open\n"
+        "3. Open a terminal / command prompt in the unzipped folder\n"
+        "4. Run:  `pip install pywin32`  (first time only)\n"
+        "5. Run:  `python import_to_drafts.py`\n\n"
+        "All drafts will appear in your Outlook Drafts folder, ready to review and send."
     )
 
 if "draft_log" in st.session_state:

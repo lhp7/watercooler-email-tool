@@ -319,6 +319,7 @@ def generate_eml_zip(
             filename = f"{org_slug}_{name_slug}.msg"
             zip_file.writestr(filename, message.to_bytes())
             log_rows.append(build_log_row(row_dict, report.filename, "Draft generated"))
+        zip_file.writestr("import_to_drafts.py", _generate_import_script())
     return output.getvalue(), pd.DataFrame(log_rows)
 
 
@@ -326,3 +327,50 @@ def log_to_csv(log_df: pd.DataFrame) -> bytes:
     output = StringIO()
     log_df.to_csv(output, index=False)
     return output.getvalue().encode("utf-8")
+
+
+IMPORT_SCRIPT = """\
+import glob, os, sys
+
+try:
+    import win32com.client
+except ImportError:
+    print("ERROR: pywin32 is not installed. Run:  pip install pywin32")
+    sys.exit(1)
+
+script_dir = os.path.dirname(os.path.abspath(__file__))
+msg_files = sorted(glob.glob(os.path.join(script_dir, "*.msg")))
+
+if not msg_files:
+    print("No .msg files found in this folder.")
+    sys.exit(0)
+
+print(f"Found {len(msg_files)} draft(s). Connecting to Outlook...")
+
+try:
+    outlook = win32com.client.Dispatch("Outlook.Application")
+    mapi = outlook.GetNamespace("MAPI")
+    drafts = mapi.GetDefaultFolder(16)
+except Exception as e:
+    print(f"ERROR: Could not connect to Outlook. Make sure Outlook is open.\\n{e}")
+    sys.exit(1)
+
+success, failed = 0, 0
+for path in msg_files:
+    name = os.path.basename(path)
+    try:
+        item = outlook.CreateItemFromTemplate(path)
+        item.Save()
+        print(f"  done  {name}")
+        success += 1
+    except Exception as e:
+        print(f"  FAIL  {name}  -  {e}")
+        failed += 1
+
+print(f"\\n{success} draft(s) saved to Outlook Drafts. {failed} failed.")
+print("Open Outlook > Drafts to review and send.")
+"""
+
+
+def _generate_import_script() -> bytes:
+    return IMPORT_SCRIPT.encode("utf-8")
