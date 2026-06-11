@@ -5,14 +5,13 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from email.message import EmailMessage
-from email.utils import formataddr, make_msgid
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Iterable
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
+from independentsoft.msg import Attachment, Message, Recipient, RecipientType
 
 from config import (
     DEFAULT_PERIOD,
@@ -41,7 +40,6 @@ class ReportFile:
 def format_attachment_filename(org_name: str, period: str) -> str:
     """Return a formatted PDF attachment filename for the given org and period."""
     org_clean = org_name.strip().title()
-    # Sanitize for use in a filename
     safe_org = re.sub(r'[<>:"/\\|?*]', "", org_clean).strip()
     safe_period = re.sub(r'[<>:"/\\|?*]', "", period.strip())
     return f"{safe_org} Campus Engagement Report {safe_period}.pdf"
@@ -88,7 +86,6 @@ def extract_reports_from_zip(uploaded_zip: bytes | BytesIO) -> list[ReportFile]:
 def _rapidfuzz_score(query: str, candidate: str) -> float | None:
     try:
         from rapidfuzz import fuzz
-
         return float(fuzz.token_set_ratio(query, candidate))
     except Exception:
         return None
@@ -96,7 +93,6 @@ def _rapidfuzz_score(query: str, candidate: str) -> float | None:
 
 def _difflib_score(query: str, candidate: str) -> float:
     from difflib import SequenceMatcher
-
     query_tokens = set(query.split())
     candidate_tokens = set(candidate.split())
     overlap = len(query_tokens & candidate_tokens) / max(len(query_tokens | candidate_tokens), 1)
@@ -202,7 +198,13 @@ def text_to_html(text: str) -> str:
     return "\n".join(f"<p>{paragraph}</p>" for paragraph in paragraphs)
 
 
-def build_email_message(
+def _split_addresses(addresses: str) -> list[str]:
+    if not addresses or not addresses.strip():
+        return []
+    return [a.strip() for a in addresses.split(",") if a.strip()]
+
+
+def build_msg_message(
     sender_email: str,
     sender_name: str,
     recipient_email: str,
@@ -214,24 +216,43 @@ def build_email_message(
     attachment_content: bytes,
     cc: str = "",
     bcc: str = "",
-) -> EmailMessage:
-    message = EmailMessage()
-    message["From"] = formataddr((sender_name, sender_email))
-    message["To"] = formataddr((recipient_name, recipient_email))
-    message["Subject"] = subject
-    message["Message-ID"] = make_msgid(domain=sender_email.split("@")[-1])
-    if cc and cc.strip():
-        message["Cc"] = cc.strip()
-    if bcc and bcc.strip():
-        message["Bcc"] = bcc.strip()
-    message.set_content(text_body, charset="utf-8")
-    message.add_alternative(html_body, subtype="html", charset="utf-8")
-    message.add_attachment(
-        attachment_content,
-        maintype="application",
-        subtype="pdf",
-        filename=attachment_filename,
-    )
+) -> Message:
+    message = Message()
+    message.subject = subject
+    message.body = text_body
+    message.body_html_text = html_body
+    message.sender_name = sender_name
+    message.sender_email_address = sender_email
+
+    recipients = []
+
+    to_recipient = Recipient()
+    to_recipient.display_name = recipient_name
+    to_recipient.email_address = recipient_email
+    to_recipient.recipient_type = RecipientType.TO
+    recipients.append(to_recipient)
+
+    for addr in _split_addresses(cc):
+        r = Recipient()
+        r.display_name = addr
+        r.email_address = addr
+        r.recipient_type = RecipientType.CC
+        recipients.append(r)
+
+    for addr in _split_addresses(bcc):
+        r = Recipient()
+        r.display_name = addr
+        r.email_address = addr
+        r.recipient_type = RecipientType.BCC
+        recipients.append(r)
+
+    message.recipients = recipients
+
+    attachment = Attachment()
+    attachment.file_name = attachment_filename
+    attachment.data = attachment_content
+    message.attachments = [attachment]
+
     return message
 
 
@@ -278,16 +299,16 @@ def generate_eml_zip(
                 log_rows.append(build_log_row(row_dict, "", "Skipped - missing report"))
                 continue
             body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
-            html = text_to_html(body)
+            html_body = text_to_html(body)
             attachment_name = format_attachment_filename(row["org_name"], period)
-            message = build_email_message(
+            message = build_msg_message(
                 sender_email=sender_email,
                 sender_name=sender_name,
                 recipient_email=row["email"],
                 recipient_name=row["recipient_name"],
                 subject=row["subject"],
                 text_body=body,
-                html_body=html,
+                html_body=html_body,
                 attachment_filename=attachment_name,
                 attachment_content=report.content,
                 cc=row.get("cc", ""),
@@ -295,8 +316,8 @@ def generate_eml_zip(
             )
             org_slug = normalize_org_name(row["org_name"]).replace(" ", "_")
             name_slug = normalize_org_name(row["recipient_name"]).replace(" ", "_")
-            filename = f"{org_slug}_{name_slug}.eml"
-            zip_file.writestr(filename, message.as_bytes())
+            filename = f"{org_slug}_{name_slug}.msg"
+            zip_file.writestr(filename, message.to_bytes())
             log_rows.append(build_log_row(row_dict, report.filename, "Draft generated"))
     return output.getvalue(), pd.DataFrame(log_rows)
 
