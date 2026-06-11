@@ -291,11 +291,9 @@ if "eml_zip" in st.session_state:
     st.info(
         "**How to load these into Outlook Drafts:**\n\n"
         "1. Unzip the downloaded file\n"
-        "2. Make sure Outlook is open\n"
-        "3. Open a terminal / command prompt in the unzipped folder\n"
-        "4. Run:  `pip install pywin32`  (first time only)\n"
-        "5. Run:  `python import_to_drafts.py`\n\n"
-        "All drafts will appear in your Outlook Drafts folder, ready to review and send."
+        "2. Select all the `.msg` files (Ctrl+A)\n"
+        "3. Drag and drop them into your Outlook Drafts folder\n\n"
+        "Each draft will open as an unsent email ready to send — with the correct recipient, subject, and attachment already filled in."
     )
 
 if "draft_log" in st.session_state:

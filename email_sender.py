@@ -11,7 +11,7 @@ from typing import Iterable
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
-from independentsoft.msg import Attachment, Message, Recipient, RecipientType
+from independentsoft.msg import Attachment, Message, MessageFlag, Recipient, RecipientType
 
 from config import (
     DEFAULT_PERIOD,
@@ -218,6 +218,8 @@ def build_msg_message(
     bcc: str = "",
 ) -> Message:
     message = Message()
+    message.message_class = "IPM.Note"
+    message.message_flags = [MessageFlag.UNSENT]
     message.subject = subject
     message.body = text_body
     message.body_html_text = html_body
@@ -319,7 +321,6 @@ def generate_eml_zip(
             filename = f"{org_slug}_{name_slug}.msg"
             zip_file.writestr(filename, message.to_bytes())
             log_rows.append(build_log_row(row_dict, report.filename, "Draft generated"))
-        zip_file.writestr("import_to_drafts.py", _generate_import_script())
     return output.getvalue(), pd.DataFrame(log_rows)
 
 
