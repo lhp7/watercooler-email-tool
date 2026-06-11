@@ -1,4 +1,4 @@
 streamlit>=1.37
 pandas>=2.2
 rapidfuzz>=3.9
-
+independentsoft.msg>=1.6
