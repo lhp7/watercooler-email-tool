@@ -38,6 +38,15 @@ class ReportFile:
     content: bytes
 
 
+def format_attachment_filename(org_name: str, period: str) -> str:
+    """Return a formatted PDF attachment filename for the given org and period."""
+    org_clean = org_name.strip().title()
+    # Sanitize for use in a filename
+    safe_org = re.sub(r'[<>:"/\\|?*]', "", org_clean).strip()
+    safe_period = re.sub(r'[<>:"/\\|?*]', "", period.strip())
+    return f"{safe_org} Campus Engagement Report {safe_period}.pdf"
+
+
 def normalize_org_name(value: object) -> str:
     text = "" if pd.isna(value) else str(value)
     text = text.lower()
@@ -173,6 +182,8 @@ def build_match_table(recipients: pd.DataFrame, reports: list[ReportFile]) -> pd
                 "status": match["status"],
                 "subject": render_subject(recipient["first_name"], recipient["org_name"], DEFAULT_PERIOD),
                 "body": render_text_body(recipient["first_name"], recipient["org_name"], DEFAULT_PERIOD),
+                "cc": "",
+                "bcc": "",
             }
         )
     return pd.DataFrame(rows)
@@ -201,19 +212,25 @@ def build_email_message(
     html_body: str,
     attachment_filename: str,
     attachment_content: bytes,
+    cc: str = "",
+    bcc: str = "",
 ) -> EmailMessage:
     message = EmailMessage()
     message["From"] = formataddr((sender_name, sender_email))
     message["To"] = formataddr((recipient_name, recipient_email))
     message["Subject"] = subject
     message["Message-ID"] = make_msgid(domain=sender_email.split("@")[-1])
+    if cc and cc.strip():
+        message["Cc"] = cc.strip()
+    if bcc and bcc.strip():
+        message["Bcc"] = bcc.strip()
     message.set_content(text_body, charset="utf-8")
     message.add_alternative(html_body, subtype="html", charset="utf-8")
     message.add_attachment(
         attachment_content,
         maintype="application",
         subtype="pdf",
-        filename=Path(attachment_filename).name,
+        filename=attachment_filename,
     )
     return message
 
@@ -227,6 +244,8 @@ def build_log_row(row: dict, report_filename: str, status: str) -> dict:
         "Recipient": row.get("recipient_name", ""),
         "Org": row.get("org_name", ""),
         "Email": row.get("email", ""),
+        "CC": row.get("cc", ""),
+        "BCC": row.get("bcc", ""),
         "Report Attached": Path(report_filename).name if report_filename else "",
         "Status": status,
         "Timestamp": _timestamp(),
@@ -260,6 +279,7 @@ def generate_eml_zip(
                 continue
             body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
             html = text_to_html(body)
+            attachment_name = format_attachment_filename(row["org_name"], period)
             message = build_email_message(
                 sender_email=sender_email,
                 sender_name=sender_name,
@@ -268,8 +288,10 @@ def generate_eml_zip(
                 subject=row["subject"],
                 text_body=body,
                 html_body=html,
-                attachment_filename=report.filename,
+                attachment_filename=attachment_name,
                 attachment_content=report.content,
+                cc=row.get("cc", ""),
+                bcc=row.get("bcc", ""),
             )
             org_slug = normalize_org_name(row["org_name"]).replace(" ", "_")
             name_slug = normalize_org_name(row["recipient_name"]).replace(" ", "_")

@@ -13,6 +13,7 @@ from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS
 from email_sender import (
     build_match_table,
     extract_reports_from_zip,
+    format_attachment_filename,
     generate_eml_zip,
     log_to_csv,
     read_recipients_csv,
@@ -84,12 +85,13 @@ def styled_status(df: pd.DataFrame):
     return df.style.apply(row_style, axis=1)
 
 
-def pdf_anchor(report) -> str:
-    filename = html.escape(Path(report.filename).name)
+def pdf_anchor(report, org_name: str, period: str) -> str:
+    attachment_name = format_attachment_filename(org_name, period)
     encoded = base64.b64encode(report.content).decode("ascii")
+    safe_name = html.escape(attachment_name)
     return (
         f'<a href="data:application/pdf;base64,{encoded}" '
-        f'download="{filename}" target="_blank">Open attached PDF: {filename}</a>'
+        f'download="{safe_name}" target="_blank">Open attached PDF: {safe_name}</a>'
     )
 
 
@@ -207,6 +209,8 @@ edited_rows = []
 
 for idx, row in match_table.iterrows():
     ready = row["status"] == "Ready"
+    cc = row.get("cc", "")
+    bcc = row.get("bcc", "")
     with st.container(border=True):
         title_cols = st.columns([0.8, 2.1, 2.4, 2.7])
         include = title_cols[0].checkbox(
@@ -222,11 +226,11 @@ for idx, row in match_table.iterrows():
         if ready:
             report = report_lookup.get(row["matched_report"])
             if report:
-                st.markdown(pdf_anchor(report), unsafe_allow_html=True)
+                st.markdown(pdf_anchor(report, row["org_name"], period), unsafe_allow_html=True)
                 st.download_button(
                     "Download attached PDF",
                     data=report.content,
-                    file_name=Path(report.filename).name,
+                    file_name=format_attachment_filename(row["org_name"], period),
                     mime="application/pdf",
                     key=f"pdf_download_{idx}_{row['email']}",
                 )
@@ -246,6 +250,19 @@ for idx, row in match_table.iterrows():
             key=f"body_{idx}_{row['email']}",
             disabled=not ready,
         )
+        cc_col, bcc_col = st.columns(2)
+        cc = cc_col.text_input(
+            "CC (optional, comma-separated)",
+            value=row.get("cc", ""),
+            key=f"cc_{idx}_{row['email']}",
+            disabled=not ready,
+        )
+        bcc = bcc_col.text_input(
+            "BCC (optional, comma-separated)",
+            value=row.get("bcc", ""),
+            key=f"bcc_{idx}_{row['email']}",
+            disabled=not ready,
+        )
 
     edited_rows.append(
         {
@@ -260,6 +277,8 @@ for idx, row in match_table.iterrows():
             "status": row["status"],
             "subject": subject,
             "body": body,
+            "cc": cc,
+            "bcc": bcc,
         }
     )
 
