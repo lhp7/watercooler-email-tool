@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-MAX_RECIPIENTS = 30
+MAX_RECIPIENTS = 50
 MATCH_THRESHOLD = 82
 DEFAULT_PERIOD = "January - May 2026"
 
@@ -20,7 +20,7 @@ BRAND_COLORS = {
     "line": "#D9E7EC",
 }
 
-DRAFT_SENDER_NAME = "Erik"
+DRAFT_SENDER_NAME = "Erik Moss"
 DRAFT_SENDER_EMAIL = "erik@watercooler.org"
 
 SUBJECT_TEMPLATE = "Your Pegasus Park Campus Engagement Report - {period}"
@@ -33,9 +33,8 @@ Your report is attached and includes a summary of your team's on-campus attendan
 
 Please don't hesitate to reach out if you have any questions about the data or would like to discuss your team's campus presence.
 
-Warm regards,
+Best,
 Erik
-Water Cooler at Pegasus Park | Pegasus Park
 """
 
 HTML_TEMPLATE = """\
@@ -47,8 +46,6 @@ HTML_TEMPLATE = """\
 
 <p>Please don't hesitate to reach out if you have any questions about the data or would like to discuss your team's campus presence.</p>
 
-<p>Warm regards,<br>
-Erik<br>
-Water Cooler at Pegasus Park | Pegasus Park</p>
+<p>Best,<br>
+Erik</p>
 """
-

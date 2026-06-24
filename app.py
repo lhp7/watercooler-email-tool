@@ -13,6 +13,7 @@ from email_sender import (
     generate_eml_zip,
     log_to_csv,
     read_recipients_csv,
+    render_signature_html,
     render_subject,
     render_text_body,
     validate_recipients,
@@ -119,14 +120,17 @@ report_cols[1].metric("Max recipients", MAX_RECIPIENTS)
 report_cols[2].metric("Output", "Outlook draft ZIP")
 
 st.subheader("Recipients")
-input_mode = st.radio("Recipient input method", ["Upload CSV", "Manual entry"], horizontal=True)
+input_mode = st.radio("Recipient input method", ["Upload CEO contact file", "Manual entry"], horizontal=True)
 
 recipients = pd.DataFrame()
 recipient_errors: list[str] = []
 
-if input_mode == "Upload CSV":
-    recipient_csv = st.file_uploader("Upload recipient CSV", type=["csv"])
-    st.caption("Required columns: first_name, last_name, email, org_name")
+if input_mode == "Upload CEO contact file":
+    recipient_csv = st.file_uploader("Upload recipient CSV or Excel file", type=["csv", "xlsx", "xls"])
+    st.caption(
+        "Compatible with the CEO list format: Primary Contact, Greeting, Contact Title, "
+        "Contact Email, Organization Name."
+    )
     if recipient_csv:
         try:
             recipients, recipient_errors = read_recipients_csv(recipient_csv)
@@ -191,6 +195,7 @@ st.subheader("Email draft review")
 st.caption("Review each draft below. Edit subject, CC, BCC, and body as needed, then download the PDF to verify the attachment.")
 
 report_lookup = {report.filename: report for report in reports}
+signature_preview_html = render_signature_html()
 edited_rows = []
 
 for idx, row in match_table.iterrows():
@@ -213,7 +218,7 @@ for idx, row in match_table.iterrows():
             report = report_lookup.get(row["matched_report"])
             if report:
                 st.download_button(
-                    f"📎 Download attached PDF: {format_attachment_filename(row['org_name'], period)}",
+                    f"Download attached PDF: {format_attachment_filename(row['org_name'], period)}",
                     data=report.content,
                     file_name=format_attachment_filename(row["org_name"], period),
                     mime="application/pdf",
@@ -246,6 +251,8 @@ for idx, row in match_table.iterrows():
             key=f"body_{idx}_{row['email']}",
             disabled=not ready,
         )
+        st.markdown("**Signature added automatically**")
+        st.markdown(signature_preview_html, unsafe_allow_html=True)
 
     edited_rows.append(
         {
@@ -293,7 +300,7 @@ if "eml_zip" in st.session_state:
         "1. Unzip the downloaded file\n"
         "2. Select all the `.msg` files (Ctrl+A)\n"
         "3. Drag and drop them into your Outlook Drafts folder\n\n"
-        "Each draft will open as an unsent email ready to send — with the correct recipient, subject, and attachment already filled in."
+        "Each draft will open as an unsent email ready to send - with the correct recipient, subject, and attachment already filled in."
     )
 
 if "draft_log" in st.session_state:

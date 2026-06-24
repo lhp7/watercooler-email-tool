@@ -1,4 +1,5 @@
 streamlit>=1.37
 pandas>=2.2
+openpyxl>=3.1
 rapidfuzz>=3.9
 independentsoft.msg>=1.6

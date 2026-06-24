@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import html
 import re
 from dataclasses import dataclass
 from datetime import datetime
@@ -25,8 +27,36 @@ from config import (
 )
 
 
-REQUIRED_COLUMNS = ["first_name", "last_name", "email", "org_name"]
+REQUIRED_COLUMNS = ["first_name", "email", "org_name"]
+OUTPUT_COLUMNS = ["first_name", "last_name", "recipient_name", "email", "org_name", "contact_title"]
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+SIGNATURE_LOGO_PATH = Path(__file__).with_name("signature_logo.png")
+SIGNATURE_WEBSITE_URL = "http://dallasfoundation.org/"
+SIGNATURE_LINKEDIN_URL = "https://www.linkedin.com/in/erik-moss-a636125b/"
+
+CONTACT_COLUMN_ALIASES = {
+    "primary contact": "recipient_name",
+    "primarycontact": "recipient_name",
+    "contact": "recipient_name",
+    "contact name": "recipient_name",
+    "name": "recipient_name",
+    "recipient name": "recipient_name",
+    "greeting": "first_name",
+    "first name": "first_name",
+    "firstname": "first_name",
+    "last name": "last_name",
+    "lastname": "last_name",
+    "contact title": "contact_title",
+    "title": "contact_title",
+    "contact email": "email",
+    "email": "email",
+    "email address": "email",
+    "organization name": "org_name",
+    "organization": "org_name",
+    "org": "org_name",
+    "org name": "org_name",
+    "company": "org_name",
+}
 
 
 @dataclass(frozen=True)
@@ -126,17 +156,60 @@ def match_report(org_name: str, reports: Iterable[ReportFile], threshold: int = 
     }
 
 
-def validate_recipients(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def _canonical_column_name(column: object) -> str:
+    text = "" if pd.isna(column) else str(column)
+    text = text.strip().lower()
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return " ".join(text.split())
+
+
+def _split_name(full_name: str) -> tuple[str, str]:
+    pieces = str(full_name or "").strip().split()
+    if not pieces:
+        return "", ""
+    if len(pieces) == 1:
+        return pieces[0], ""
+    return pieces[0], " ".join(pieces[1:])
+
+
+def normalize_recipient_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Map either sample-recipient columns or the CEO list columns into app fields."""
     data = df.copy()
-    data.columns = [str(col).strip().lower() for col in data.columns]
+    rename_map = {}
+    for column in data.columns:
+        canonical = _canonical_column_name(column)
+        if canonical in CONTACT_COLUMN_ALIASES:
+            rename_map[column] = CONTACT_COLUMN_ALIASES[canonical]
+    data = data.rename(columns=rename_map)
+
+    for column in OUTPUT_COLUMNS:
+        if column not in data.columns:
+            data[column] = ""
+
+    for column in OUTPUT_COLUMNS:
+        data[column] = data[column].fillna("").astype(str).str.strip()
+
+    if "recipient_name" in data.columns:
+        missing_first = data["first_name"].eq("")
+        data.loc[missing_first, "first_name"] = data.loc[missing_first, "recipient_name"].map(lambda value: _split_name(value)[0])
+        missing_last = data["last_name"].eq("")
+        data.loc[missing_last, "last_name"] = data.loc[missing_last, "recipient_name"].map(lambda value: _split_name(value)[1])
+
+    data["recipient_name"] = data["recipient_name"].where(
+        data["recipient_name"].ne(""),
+        (data["first_name"] + " " + data["last_name"]).str.strip(),
+    )
+
+    return data[OUTPUT_COLUMNS].copy()
+
+
+def validate_recipients(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    data = normalize_recipient_columns(df)
     errors: list[str] = []
     missing = [column for column in REQUIRED_COLUMNS if column not in data.columns]
     if missing:
-        return pd.DataFrame(columns=REQUIRED_COLUMNS), [f"Missing required columns: {', '.join(missing)}"]
+        return pd.DataFrame(columns=OUTPUT_COLUMNS), [f"Missing required columns: {', '.join(missing)}"]
 
-    data = data[REQUIRED_COLUMNS].copy()
-    for column in REQUIRED_COLUMNS:
-        data[column] = data[column].fillna("").astype(str).str.strip()
     data = data[(data[REQUIRED_COLUMNS] != "").any(axis=1)].copy()
 
     if len(data) > MAX_RECIPIENTS:
@@ -150,14 +223,17 @@ def validate_recipients(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
         if not row["email"] or not EMAIL_PATTERN.match(row["email"]):
             errors.append(f"Row {row_number}: email is missing or invalid.")
         if not row["org_name"]:
-            errors.append(f"Row {row_number}: org_name is required.")
+            errors.append(f"Row {row_number}: organization name is required.")
 
-    data["recipient_name"] = (data["first_name"] + " " + data["last_name"]).str.strip()
     return data.reset_index(drop=True), errors
 
 
 def read_recipients_csv(uploaded_file) -> tuple[pd.DataFrame, list[str]]:
-    df = pd.read_csv(uploaded_file)
+    name = getattr(uploaded_file, "name", "").lower()
+    if name.endswith((".xlsx", ".xls")):
+        df = pd.read_excel(uploaded_file)
+    else:
+        df = pd.read_csv(uploaded_file)
     return validate_recipients(df)
 
 
@@ -194,8 +270,68 @@ def render_text_body(first_name: str, org_name: str, period: str) -> str:
 
 
 def text_to_html(text: str) -> str:
-    paragraphs = [part.strip().replace("\n", "<br>") for part in text.split("\n\n") if part.strip()]
+    paragraphs = [
+        html.escape(part.strip()).replace("\n", "<br>")
+        for part in text.split("\n\n")
+        if part.strip()
+    ]
     return "\n".join(f"<p>{paragraph}</p>" for paragraph in paragraphs)
+
+
+def _signature_logo_data_uri() -> str:
+    if not SIGNATURE_LOGO_PATH.exists():
+        return ""
+    encoded = base64.b64encode(SIGNATURE_LOGO_PATH.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
+
+def render_signature_html() -> str:
+    """Return the branded Outlook-style email signature shown below every draft."""
+    logo_uri = _signature_logo_data_uri()
+    logo_html = ""
+    if logo_uri:
+        logo_html = (
+            f'<img src="{logo_uri}" alt="The Dallas Foundation" width="92" '
+            'style="display:block;width:92px;height:auto;border:0;outline:none;text-decoration:none;">'
+        )
+
+    return f"""
+<div style="margin-top:24px;font-family:Georgia,'Times New Roman',serif;color:#6f6f6f;line-height:1.35;">
+  <div style="margin:0 0 28px 0;">{logo_html}</div>
+  <div style="font-size:19px;font-weight:700;color:#4a4a4a;margin-bottom:3px;">Erik Moss</div>
+  <div style="font-size:17px;color:#7a7a7a;margin-bottom:28px;">Director of the Water Cooler at Pegasus Park</div>
+  <div style="font-size:14px;color:#777777;margin-bottom:10px;">
+    3000 Pegasus Park Drive. #930&nbsp;&nbsp;|&nbsp;&nbsp;Dallas, TX 75247
+  </div>
+  <div style="font-size:14px;color:#777777;margin-bottom:10px;">
+    <strong style="color:#626262;">P:</strong> 214-694-2529&nbsp;&nbsp;|&nbsp;&nbsp;<strong style="color:#626262;">C:</strong> 817-987-9945
+  </div>
+  <div style="font-size:14px;margin-bottom:8px;">
+    <a href="{SIGNATURE_WEBSITE_URL}" style="color:#0000EE;text-decoration:underline;">dallasfoundation.org</a>
+  </div>
+  <div style="font-size:14px;">
+    <a href="{SIGNATURE_LINKEDIN_URL}" style="color:#0000EE;text-decoration:underline;">{SIGNATURE_LINKEDIN_URL}</a>
+  </div>
+</div>
+""".strip()
+
+
+def render_signature_text() -> str:
+    return f"""Erik Moss
+Director of the Water Cooler at Pegasus Park
+
+3000 Pegasus Park Drive. #930 | Dallas, TX 75247
+P: 214-694-2529 | C: 817-987-9945
+dallasfoundation.org
+{SIGNATURE_LINKEDIN_URL}"""
+
+
+def build_email_html(body: str) -> str:
+    return f"{text_to_html(body)}\n{render_signature_html()}"
+
+
+def build_email_text(body: str) -> str:
+    return f"{body.rstrip()}\n\n{render_signature_text()}"
 
 
 def _split_addresses(addresses: str) -> list[str]:
@@ -301,7 +437,8 @@ def generate_eml_zip(
                 log_rows.append(build_log_row(row_dict, "", "Skipped - missing report"))
                 continue
             body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
-            html_body = text_to_html(body)
+            text_body = build_email_text(body)
+            html_body = build_email_html(body)
             attachment_name = format_attachment_filename(row["org_name"], period)
             message = build_msg_message(
                 sender_email=sender_email,
@@ -309,7 +446,7 @@ def generate_eml_zip(
                 recipient_email=row["email"],
                 recipient_name=row["recipient_name"],
                 subject=row["subject"],
-                text_body=body,
+                text_body=text_body,
                 html_body=html_body,
                 attachment_filename=attachment_name,
                 attachment_content=report.content,
