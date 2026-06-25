@@ -340,6 +340,33 @@ def _split_addresses(addresses: str) -> list[str]:
     return [a.strip() for a in addresses.split(",") if a.strip()]
 
 
+def _set_optional_attr(target: object, name: str, value: object) -> None:
+    try:
+        setattr(target, name, value)
+    except Exception:
+        pass
+
+
+def _format_display_address(display_name: str, email_address: str) -> str:
+    name = str(display_name or "").strip()
+    email = str(email_address or "").strip()
+    if not name or name.lower() == email.lower():
+        return email
+    return f"{name} <{email}>"
+
+
+def _make_recipient(display_name: str, email_address: str, recipient_type) -> Recipient:
+    recipient = Recipient()
+    formatted = _format_display_address(display_name, email_address)
+    recipient.display_name = formatted
+    recipient.email_address = email_address
+    recipient.recipient_type = recipient_type
+    _set_optional_attr(recipient, "smtp_address", email_address)
+    _set_optional_attr(recipient, "address", email_address)
+    _set_optional_attr(recipient, "address_type", "SMTP")
+    return recipient
+
+
 def build_msg_message(
     sender_email: str,
     sender_name: str,
@@ -361,30 +388,23 @@ def build_msg_message(
     message.body_html_text = html_body
     message.sender_name = sender_name
     message.sender_email_address = sender_email
+    _set_optional_attr(message, "sender_smtp_address", sender_email)
 
     recipients = []
 
-    to_recipient = Recipient()
-    to_recipient.display_name = recipient_name
-    to_recipient.email_address = recipient_email
-    to_recipient.recipient_type = RecipientType.TO
-    recipients.append(to_recipient)
+    to_display = _format_display_address(recipient_name, recipient_email)
+    recipients.append(_make_recipient(recipient_name, recipient_email, RecipientType.TO))
 
     for addr in _split_addresses(cc):
-        r = Recipient()
-        r.display_name = addr
-        r.email_address = addr
-        r.recipient_type = RecipientType.CC
-        recipients.append(r)
+        recipients.append(_make_recipient(addr, addr, RecipientType.CC))
 
     for addr in _split_addresses(bcc):
-        r = Recipient()
-        r.display_name = addr
-        r.email_address = addr
-        r.recipient_type = RecipientType.BCC
-        recipients.append(r)
+        recipients.append(_make_recipient(addr, addr, RecipientType.BCC))
 
     message.recipients = recipients
+    _set_optional_attr(message, "display_to", to_display)
+    _set_optional_attr(message, "display_cc", "; ".join(_split_addresses(cc)))
+    _set_optional_attr(message, "display_bcc", "; ".join(_split_addresses(bcc)))
 
     attachment = Attachment()
     attachment.file_name = attachment_filename

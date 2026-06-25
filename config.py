@@ -27,25 +27,29 @@ SUBJECT_TEMPLATE = "Your Pegasus Park Campus Engagement Report - {period}"
 
 TEXT_TEMPLATE = """Hi {first_name},
 
-I hope you're doing well! I'm reaching out from the Water Cooler team at Pegasus Park to share {org_name}'s campus engagement report for {period}.
+In the spirit of transparency, we wanted to share something we've been tracking across our campus community.
 
-Your report is attached and includes a summary of your team's on-campus attendance, badge activity, and engagement trends for the period. These reports are generated from our keycard access data and are sent every six months to help your team stay informed about how you're using the space.
+As stewards of the Water Cooler — a space we're incredibly proud of — we're always looking at how it's being used and how we can continue to make it valuable for the organizations that call it home. Campus engagement is one of the key factors we look at as we assess the life and energy of this beautiful space.
 
-Please don't hesitate to reach out if you have any questions about the data or would like to discuss your team's campus presence.
+Attached is {org_name}'s campus engagement report for {period}. It reflects your team's on-campus presence over the period and is part of our effort to keep every tenant informed and connected to how they're showing up here.
 
-Best,
+We'd love to hear your thoughts, and as always, please don't hesitate to reach out if you have any questions.
+
+Warm regards,
 Erik
 """
 
 HTML_TEMPLATE = """\
 <p>Hi {first_name},</p>
 
-<p>I hope you're doing well! I'm reaching out from the Water Cooler team at Pegasus Park to share {org_name}'s campus engagement report for {period}.</p>
+<p>In the spirit of transparency, we wanted to share something we've been tracking across our campus community.</p>
 
-<p>Your report is attached and includes a summary of your team's on-campus attendance, badge activity, and engagement trends for the period. These reports are generated from our keycard access data and are sent every six months to help your team stay informed about how you're using the space.</p>
+<p>As stewards of the Water Cooler — a space we're incredibly proud of — we're always looking at how it's being used and how we can continue to make it valuable for the organizations that call it home. Campus engagement is one of the key factors we look at as we assess the life and energy of this beautiful space.</p>
 
-<p>Please don't hesitate to reach out if you have any questions about the data or would like to discuss your team's campus presence.</p>
+<p>Attached is {org_name}'s campus engagement report for {period}. It reflects your team's on-campus presence over the period and is part of our effort to keep every tenant informed and connected to how they're showing up here.</p>
 
-<p>Best,<br>
+<p>We'd love to hear your thoughts, and as always, please don't hesitate to reach out if you have any questions.</p>
+
+<p>Warm regards,<br>
 Erik</p>
 """

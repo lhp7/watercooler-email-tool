@@ -11,6 +11,7 @@ Standalone Streamlit app for preparing Water Cooler at Pegasus Park engagement r
 - Shows a downloadable link to the exact PDF attached to each draft.
 - Adds Erik Moss's Water Cooler signature and logo to every email draft.
 - Generates Outlook `.msg` draft files with the correct PDF attached.
+- Writes each Outlook recipient as `Name <email address>` so the To field includes the actual email address.
 - Produces a downloadable draft log CSV.
 
 ## Files
@@ -96,6 +97,7 @@ Edit `config.py` to change:
 - Draft sender name/email
 - Subject line
 - Plain-text body
+- Signature details are in `email_sender.py`
 - Fuzzy match threshold
 
 Available template variables:
