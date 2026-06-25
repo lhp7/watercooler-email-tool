@@ -7,19 +7,20 @@ import html
 import re
 from dataclasses import dataclass
 from datetime import datetime
+from email.message import EmailMessage
+from email.policy import SMTP
+from email.utils import formataddr, make_msgid
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Iterable
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
-from independentsoft.msg import Attachment, Message, MessageFlag, Recipient, RecipientType
 
 from config import (
     DEFAULT_PERIOD,
     DRAFT_SENDER_EMAIL,
     DRAFT_SENDER_NAME,
-    HTML_TEMPLATE,
     MATCH_THRESHOLD,
     MAX_RECIPIENTS,
     SUBJECT_TEMPLATE,
@@ -285,9 +286,9 @@ def _signature_logo_data_uri() -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def render_signature_html() -> str:
+def render_signature_html(logo_cid: str | None = None) -> str:
     """Return the branded Outlook-style email signature shown below every draft."""
-    logo_uri = _signature_logo_data_uri()
+    logo_uri = f"cid:{logo_cid}" if logo_cid else _signature_logo_data_uri()
     logo_html = ""
     if logo_uri:
         logo_html = (
@@ -326,8 +327,8 @@ dallasfoundation.org
 {SIGNATURE_LINKEDIN_URL}"""
 
 
-def build_email_html(body: str) -> str:
-    return f"{text_to_html(body)}\n{render_signature_html()}"
+def build_email_html(body: str, logo_cid: str | None = None) -> str:
+    return f"{text_to_html(body)}\n{render_signature_html(logo_cid=logo_cid)}"
 
 
 def build_email_text(body: str) -> str:
@@ -340,13 +341,6 @@ def _split_addresses(addresses: str) -> list[str]:
     return [a.strip() for a in addresses.split(",") if a.strip()]
 
 
-def _set_optional_attr(target: object, name: str, value: object) -> None:
-    try:
-        setattr(target, name, value)
-    except Exception:
-        pass
-
-
 def _format_display_address(display_name: str, email_address: str) -> str:
     name = str(display_name or "").strip()
     email = str(email_address or "").strip()
@@ -355,62 +349,64 @@ def _format_display_address(display_name: str, email_address: str) -> str:
     return f"{name} <{email}>"
 
 
-def _make_recipient(display_name: str, email_address: str, recipient_type) -> Recipient:
-    recipient = Recipient()
-    formatted = _format_display_address(display_name, email_address)
-    recipient.display_name = formatted
-    recipient.email_address = email_address
-    recipient.recipient_type = recipient_type
-    _set_optional_attr(recipient, "smtp_address", email_address)
-    _set_optional_attr(recipient, "address", email_address)
-    _set_optional_attr(recipient, "address_type", "SMTP")
-    return recipient
+def _format_email_header(display_name: str, email_address: str) -> str:
+    return formataddr((str(display_name or "").strip(), str(email_address or "").strip()))
 
 
-def build_msg_message(
+def _format_address_list(addresses: str) -> str:
+    return ", ".join(formataddr((addr, addr)) for addr in _split_addresses(addresses))
+
+
+def _logo_bytes() -> bytes | None:
+    if not SIGNATURE_LOGO_PATH.exists():
+        return None
+    return SIGNATURE_LOGO_PATH.read_bytes()
+
+
+def build_eml_message(
     sender_email: str,
     sender_name: str,
     recipient_email: str,
     recipient_name: str,
     subject: str,
-    text_body: str,
-    html_body: str,
+    body: str,
     attachment_filename: str,
     attachment_content: bytes,
     cc: str = "",
     bcc: str = "",
-) -> Message:
-    message = Message()
-    message.message_class = "IPM.Note"
-    message.message_flags = [MessageFlag.UNSENT]
-    message.subject = subject
-    message.body = text_body
-    message.body_html_text = html_body
-    message.sender_name = sender_name
-    message.sender_email_address = sender_email
-    _set_optional_attr(message, "sender_smtp_address", sender_email)
+) -> EmailMessage:
+    message = EmailMessage(policy=SMTP)
+    message["X-Unsent"] = "1"
+    message["From"] = _format_email_header(sender_name, sender_email)
+    message["To"] = _format_email_header(recipient_name, recipient_email)
+    if cc and cc.strip():
+        message["Cc"] = _format_address_list(cc)
+    if bcc and bcc.strip():
+        message["Bcc"] = _format_address_list(bcc)
+    message["Subject"] = subject
 
-    recipients = []
+    logo_content = _logo_bytes()
+    logo_cid = make_msgid(domain="watercooler.local")[1:-1] if logo_content else None
+    message.set_content(build_email_text(body), charset="utf-8")
+    message.add_alternative(build_email_html(body, logo_cid=logo_cid), subtype="html", charset="utf-8")
 
-    to_display = _format_display_address(recipient_name, recipient_email)
-    recipients.append(_make_recipient(recipient_name, recipient_email, RecipientType.TO))
+    if logo_content and logo_cid:
+        html_part = message.get_payload()[1]
+        html_part.add_related(
+            logo_content,
+            maintype="image",
+            subtype="png",
+            cid=f"<{logo_cid}>",
+            filename="signature_logo.png",
+            disposition="inline",
+        )
 
-    for addr in _split_addresses(cc):
-        recipients.append(_make_recipient(addr, addr, RecipientType.CC))
-
-    for addr in _split_addresses(bcc):
-        recipients.append(_make_recipient(addr, addr, RecipientType.BCC))
-
-    message.recipients = recipients
-    _set_optional_attr(message, "display_to", to_display)
-    _set_optional_attr(message, "display_cc", "; ".join(_split_addresses(cc)))
-    _set_optional_attr(message, "display_bcc", "; ".join(_split_addresses(bcc)))
-
-    attachment = Attachment()
-    attachment.file_name = attachment_filename
-    attachment.data = attachment_content
-    message.attachments = [attachment]
-
+    message.add_attachment(
+        attachment_content,
+        maintype="application",
+        subtype="pdf",
+        filename=attachment_filename,
+    )
     return message
 
 
@@ -457,17 +453,14 @@ def generate_eml_zip(
                 log_rows.append(build_log_row(row_dict, "", "Skipped - missing report"))
                 continue
             body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
-            text_body = build_email_text(body)
-            html_body = build_email_html(body)
             attachment_name = format_attachment_filename(row["org_name"], period)
-            message = build_msg_message(
+            message = build_eml_message(
                 sender_email=sender_email,
                 sender_name=sender_name,
                 recipient_email=row["email"],
                 recipient_name=row["recipient_name"],
                 subject=row["subject"],
-                text_body=text_body,
-                html_body=html_body,
+                body=body,
                 attachment_filename=attachment_name,
                 attachment_content=report.content,
                 cc=row.get("cc", ""),
@@ -475,8 +468,8 @@ def generate_eml_zip(
             )
             org_slug = normalize_org_name(row["org_name"]).replace(" ", "_")
             name_slug = normalize_org_name(row["recipient_name"]).replace(" ", "_")
-            filename = f"{org_slug}_{name_slug}.msg"
-            zip_file.writestr(filename, message.to_bytes())
+            filename = f"{org_slug}_{name_slug}.eml"
+            zip_file.writestr(filename, message.as_bytes(policy=SMTP))
             log_rows.append(build_log_row(row_dict, report.filename, "Draft generated"))
     return output.getvalue(), pd.DataFrame(log_rows)
 
@@ -486,49 +479,3 @@ def log_to_csv(log_df: pd.DataFrame) -> bytes:
     log_df.to_csv(output, index=False)
     return output.getvalue().encode("utf-8")
 
-
-IMPORT_SCRIPT = """\
-import glob, os, sys
-
-try:
-    import win32com.client
-except ImportError:
-    print("ERROR: pywin32 is not installed. Run:  pip install pywin32")
-    sys.exit(1)
-
-script_dir = os.path.dirname(os.path.abspath(__file__))
-msg_files = sorted(glob.glob(os.path.join(script_dir, "*.msg")))
-
-if not msg_files:
-    print("No .msg files found in this folder.")
-    sys.exit(0)
-
-print(f"Found {len(msg_files)} draft(s). Connecting to Outlook...")
-
-try:
-    outlook = win32com.client.Dispatch("Outlook.Application")
-    mapi = outlook.GetNamespace("MAPI")
-    drafts = mapi.GetDefaultFolder(16)
-except Exception as e:
-    print(f"ERROR: Could not connect to Outlook. Make sure Outlook is open.\\n{e}")
-    sys.exit(1)
-
-success, failed = 0, 0
-for path in msg_files:
-    name = os.path.basename(path)
-    try:
-        item = outlook.CreateItemFromTemplate(path)
-        item.Save()
-        print(f"  done  {name}")
-        success += 1
-    except Exception as e:
-        print(f"  FAIL  {name}  -  {e}")
-        failed += 1
-
-print(f"\\n{success} draft(s) saved to Outlook Drafts. {failed} failed.")
-print("Open Outlook > Drafts to review and send.")
-"""
-
-
-def _generate_import_script() -> bytes:
-    return IMPORT_SCRIPT.encode("utf-8")

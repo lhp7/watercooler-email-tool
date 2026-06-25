@@ -117,7 +117,7 @@ if not reports:
 report_cols = st.columns(3)
 report_cols[0].metric("PDF reports found", len(reports))
 report_cols[1].metric("Max recipients", MAX_RECIPIENTS)
-report_cols[2].metric("Output", "Outlook draft ZIP")
+report_cols[2].metric("Output", "Outlook .eml draft ZIP")
 
 st.subheader("Recipients")
 input_mode = st.radio("Recipient input method", ["Upload CEO contact file", "Manual entry"], horizontal=True)
@@ -298,9 +298,9 @@ if "eml_zip" in st.session_state:
     st.info(
         "**How to load these into Outlook Drafts:**\n\n"
         "1. Unzip the downloaded file\n"
-        "2. Select all the `.msg` files (Ctrl+A)\n"
+        "2. Select all the `.eml` files (Ctrl+A)\n"
         "3. Drag and drop them into your Outlook Drafts folder\n\n"
-        "Each draft will open as an unsent email ready to send - with the correct recipient, subject, and attachment already filled in."
+        "Each file is marked as an unsent draft, so it should open with a Send button and the correct recipient, subject, body, logo, and attachment."
     )
 
 if "draft_log" in st.session_state:

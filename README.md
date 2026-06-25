@@ -10,7 +10,8 @@ Standalone Streamlit app for preparing Water Cooler at Pegasus Park engagement r
 - Shows a full editable preview of every email before any draft file is built.
 - Shows a downloadable link to the exact PDF attached to each draft.
 - Adds Erik Moss's Water Cooler signature and logo to every email draft.
-- Generates Outlook `.msg` draft files with the correct PDF attached.
+- Generates Outlook-compatible `.eml` draft files with the correct PDF attached.
+- Marks each draft with `X-Unsent: 1` so Outlook opens it as an unsent email with a Send button.
 - Writes each Outlook recipient as `Name <email address>` so the To field includes the actual email address.
 - Produces a downloadable draft log CSV.
 
@@ -69,7 +70,7 @@ Sarah,Johnson,sarah@orgname.org,Texas Trees Foundation
 5. Check the final review box.
 6. Click `Build reviewed email draft ZIP`.
 7. Download the ZIP and unzip it.
-8. Select all `.msg` files and drag them into Outlook Drafts.
+8. Select all `.eml` files and drag them into Outlook Drafts.
 9. Open Outlook Drafts, review each email, and send one by one.
 
 ## Signature
