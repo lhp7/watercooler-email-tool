@@ -10,7 +10,7 @@ from email_sender import (
     build_match_table,
     extract_reports_from_zip,
     format_attachment_filename,
-    generate_eml_zip,
+    generate_msg_zip,
     log_to_csv,
     read_recipients_csv,
     render_signature_html,
@@ -117,7 +117,7 @@ if not reports:
 report_cols = st.columns(3)
 report_cols[0].metric("PDF reports found", len(reports))
 report_cols[1].metric("Max recipients", MAX_RECIPIENTS)
-report_cols[2].metric("Output", "Outlook .eml draft ZIP")
+report_cols[2].metric("Output", "Classic Outlook .msg draft ZIP")
 
 st.subheader("Recipients")
 input_mode = st.radio("Recipient input method", ["Upload CEO contact file", "Manual entry"], horizontal=True)
@@ -282,26 +282,26 @@ confirm = st.checkbox("I reviewed every selected email and attachment.")
 build_disabled = selected_ready.empty or not confirm
 if st.button("Build reviewed email draft ZIP", use_container_width=True, disabled=build_disabled):
     with st.spinner("Building Outlook draft files..."):
-        eml_zip, log_df = generate_eml_zip(edited, reports, period)
-    st.session_state["eml_zip"] = eml_zip
+        msg_zip, log_df = generate_msg_zip(edited, reports, period)
+    st.session_state["msg_zip"] = msg_zip
     st.session_state["draft_log"] = log_df
     st.success("Outlook draft files are ready to download.")
 
-if "eml_zip" in st.session_state:
+if "msg_zip" in st.session_state:
     st.download_button(
         "Download Outlook draft ZIP",
-        data=st.session_state["eml_zip"],
+        data=st.session_state["msg_zip"],
         file_name="water_cooler_outlook_drafts.zip",
         mime="application/zip",
         use_container_width=True,
     )
     st.info(
-        "**Load the drafts into the mailbox you will send from:**\n\n"
-        "**Classic Outlook:** Unzip the download, select all `.eml` files, and drag them into that mailbox's Drafts folder.\n\n"
-        "**New Outlook:** Unzip the download, then go to Settings → Files → Import → Start import. "
-        "Choose the extracted folder, the destination account, and its Drafts folder.\n\n"
-        "The files intentionally contain no fixed From address. Outlook should use the account that owns the destination Drafts folder. "
-        "Open one imported draft first and confirm its From account before sending the batch."
+        "**Classic Outlook (the version shown in your screenshot):**\n\n"
+        "1. Unzip the download\n"
+        "2. Select all `.msg` files\n"
+        "3. Drag them into the Drafts folder under the mailbox you will send from\n\n"
+        "They should appear as normal email drafts with recipient and subject—not as filenames. "
+        "Open one draft first and confirm its From account before sending the batch."
     )
 
 if "draft_log" in st.session_state:

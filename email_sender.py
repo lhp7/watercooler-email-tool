@@ -7,15 +7,23 @@ import html
 import re
 from dataclasses import dataclass
 from datetime import datetime
-from email.message import EmailMessage
-from email.policy import SMTP
-from email.utils import formataddr, make_msgid
 from io import BytesIO, StringIO
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Iterable
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
+from independentsoft.msg import (
+    Attachment,
+    DisplayType,
+    Message,
+    MessageFlag,
+    ObjectType,
+    Recipient,
+    RecipientType,
+    StoreSupportMask,
+)
 
 from config import (
     DEFAULT_PERIOD,
@@ -285,9 +293,9 @@ def _signature_logo_data_uri() -> str:
     return f"data:image/png;base64,{encoded}"
 
 
-def render_signature_html(logo_cid: str | None = None) -> str:
+def render_signature_html() -> str:
     """Return the branded Outlook-style email signature shown below every draft."""
-    logo_uri = f"cid:{logo_cid}" if logo_cid else _signature_logo_data_uri()
+    logo_uri = _signature_logo_data_uri()
     logo_html = ""
     if logo_uri:
         logo_html = (
@@ -326,8 +334,8 @@ dallasfoundation.org
 {SIGNATURE_LINKEDIN_URL}"""
 
 
-def build_email_html(body: str, logo_cid: str | None = None) -> str:
-    return f"{text_to_html(body)}\n{render_signature_html(logo_cid=logo_cid)}"
+def build_email_html(body: str) -> str:
+    return f"{text_to_html(body)}\n{render_signature_html()}"
 
 
 def build_email_text(body: str) -> str:
@@ -348,64 +356,65 @@ def _format_display_address(display_name: str, email_address: str) -> str:
     return f"{name} <{email}>"
 
 
-def _format_email_header(display_name: str, email_address: str) -> str:
-    return formataddr((str(display_name or "").strip(), str(email_address or "").strip()))
+def _set_optional_attr(target: object, name: str, value: object) -> None:
+    try:
+        setattr(target, name, value)
+    except Exception:
+        pass
 
 
-def _format_address_list(addresses: str) -> str:
-    return ", ".join(formataddr((addr, addr)) for addr in _split_addresses(addresses))
+def _make_recipient(display_name: str, email_address: str, recipient_type) -> Recipient:
+    recipient = Recipient()
+    recipient.address_type = "SMTP"
+    recipient.display_type = DisplayType.MAIL_USER
+    recipient.object_type = ObjectType.MAIL_USER
+    recipient.display_name = str(display_name or email_address).strip()
+    recipient.email_address = str(email_address).strip()
+    recipient.recipient_type = recipient_type
+    _set_optional_attr(recipient, "smtp_address", str(email_address).strip())
+    return recipient
 
 
-def _logo_bytes() -> bytes | None:
-    if not SIGNATURE_LOGO_PATH.exists():
-        return None
-    return SIGNATURE_LOGO_PATH.read_bytes()
+def _outlook_rtf_from_html(html_body: str) -> bytes:
+    """Return the RTF companion Outlook expects when an MSG has an HTML body."""
+    wrapped = "<html><body>" + html_body + "</body></html>"
+    return (r"{\rtf1\ansi\ansicpg1252\fromhtml1 \htmlrtf0 " + wrapped + "}").encode("utf-8")
 
 
-def build_eml_message(
+def build_msg_message(
     recipient_email: str,
     recipient_name: str,
     subject: str,
-    body: str,
+    text_body: str,
+    html_body: str,
     attachment_filename: str,
-    attachment_content: bytes,
+    attachment_file_path: str | Path,
     cc: str = "",
     bcc: str = "",
-) -> EmailMessage:
-    message = EmailMessage(policy=SMTP)
-    message["X-Unsent"] = "1"
-    # Deliberately omit From/Sender. A portable draft cannot know which Outlook
-    # account will own it; Outlook assigns the sending account when the draft is
-    # imported into that account's Drafts folder.
-    message["To"] = _format_email_header(recipient_name, recipient_email)
-    if cc and cc.strip():
-        message["Cc"] = _format_address_list(cc)
-    if bcc and bcc.strip():
-        message["Bcc"] = _format_address_list(bcc)
-    message["Subject"] = subject
+) -> Message:
+    message = Message()
+    message.message_class = "IPM.Note"
+    message.message_flags = [MessageFlag.UNSENT]
+    message.store_support_masks = [StoreSupportMask.CREATE]
+    message.subject = subject
+    message.body = text_body
+    message.body_html_text = html_body
+    message.body_rtf = _outlook_rtf_from_html(html_body)
 
-    logo_content = _logo_bytes()
-    logo_cid = make_msgid(domain="watercooler.local")[1:-1] if logo_content else None
-    message.set_content(build_email_text(body), charset="utf-8")
-    message.add_alternative(build_email_html(body, logo_cid=logo_cid), subtype="html", charset="utf-8")
+    recipients = [_make_recipient(recipient_name, recipient_email, RecipientType.TO)]
+    recipients.extend(_make_recipient(addr, addr, RecipientType.CC) for addr in _split_addresses(cc))
+    recipients.extend(_make_recipient(addr, addr, RecipientType.BCC) for addr in _split_addresses(bcc))
+    message.recipients = recipients
+    message.display_to = _format_display_address(recipient_name, recipient_email)
+    message.display_cc = "; ".join(_split_addresses(cc))
+    message.display_bcc = "; ".join(_split_addresses(bcc))
 
-    if logo_content and logo_cid:
-        html_part = message.get_payload()[1]
-        html_part.add_related(
-            logo_content,
-            maintype="image",
-            subtype="png",
-            cid=f"<{logo_cid}>",
-            filename="signature_logo.png",
-            disposition="inline",
-        )
-
-    message.add_attachment(
-        attachment_content,
-        maintype="application",
-        subtype="pdf",
-        filename=attachment_filename,
-    )
+    # Deliberately omit sender fields. Outlook associates the unsent item with
+    # the mailbox whose Drafts folder receives it.
+    attachment = Attachment(file_path=str(attachment_file_path))
+    attachment.file_name = attachment_filename
+    _set_optional_attr(attachment, "display_name", attachment_filename)
+    message.attachments = [attachment]
     return message
 
 
@@ -434,7 +443,7 @@ def rows_to_generate(edited_rows: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def generate_eml_zip(
+def generate_msg_zip(
     edited_rows: pd.DataFrame,
     reports: list[ReportFile],
     period: str,
@@ -450,21 +459,30 @@ def generate_eml_zip(
                 log_rows.append(build_log_row(row_dict, "", "Skipped - missing report"))
                 continue
             body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
+            text_body = build_email_text(body)
+            html_body = build_email_html(body)
             attachment_name = format_attachment_filename(row["org_name"], period)
-            message = build_eml_message(
-                recipient_email=row["email"],
-                recipient_name=row["recipient_name"],
-                subject=row["subject"],
-                body=body,
-                attachment_filename=attachment_name,
-                attachment_content=report.content,
-                cc=row.get("cc", ""),
-                bcc=row.get("bcc", ""),
-            )
             org_slug = normalize_org_name(row["org_name"]).replace(" ", "_")
             name_slug = normalize_org_name(row["recipient_name"]).replace(" ", "_")
-            filename = f"{org_slug}_{name_slug}.eml"
-            zip_file.writestr(filename, message.as_bytes(policy=SMTP))
+            filename = f"{org_slug}_{name_slug}.msg"
+            with TemporaryDirectory(prefix="water_cooler_draft_") as temp_dir:
+                temp_path = Path(temp_dir)
+                attachment_path = temp_path / attachment_name
+                attachment_path.write_bytes(report.content)
+                message = build_msg_message(
+                    recipient_email=row["email"],
+                    recipient_name=row["recipient_name"],
+                    subject=row["subject"],
+                    text_body=text_body,
+                    html_body=html_body,
+                    attachment_filename=attachment_name,
+                    attachment_file_path=attachment_path,
+                    cc=row.get("cc", ""),
+                    bcc=row.get("bcc", ""),
+                )
+                draft_path = temp_path / filename
+                message.save(str(draft_path))
+                zip_file.writestr(filename, draft_path.read_bytes())
             log_rows.append(build_log_row(row_dict, report.filename, "Draft generated"))
     return output.getvalue(), pd.DataFrame(log_rows)
 
@@ -473,4 +491,3 @@ def log_to_csv(log_df: pd.DataFrame) -> bytes:
     output = StringIO()
     log_df.to_csv(output, index=False)
     return output.getvalue().encode("utf-8")
-
