@@ -12,6 +12,7 @@ Standalone Streamlit app for preparing Water Cooler at Pegasus Park engagement r
 - Adds Erik Moss's Water Cooler signature and logo to every email draft.
 - Generates Outlook-compatible `.eml` draft files with the correct PDF attached.
 - Marks each draft with `X-Unsent: 1` so Outlook opens it as an unsent email with a Send button.
+- Leaves the `From` header unset so Outlook can use the mailbox that owns the destination Drafts folder.
 - Writes each Outlook recipient as `Name <email address>` so the To field includes the actual email address.
 - Produces a downloadable draft log CSV.
 
@@ -70,8 +71,9 @@ Sarah,Johnson,sarah@orgname.org,Texas Trees Foundation
 5. Check the final review box.
 6. Click `Build reviewed email draft ZIP`.
 7. Download the ZIP and unzip it.
-8. Select all `.eml` files and drag them into Outlook Drafts.
-9. Open Outlook Drafts, review each email, and send one by one.
+8. In classic Outlook, select all `.eml` files and drag them into the sending mailbox's Drafts folder.
+9. In new Outlook, use `Settings > Files > Import`, select the extracted folder, then choose the destination account and its Drafts folder.
+10. Open one imported draft and confirm the From account, recipient, subject, body, logo, and attachment before sending the batch.
 
 ## Signature
 
@@ -95,7 +97,6 @@ Keep `signature_logo.png` in the same folder as `app.py` and `email_sender.py`.
 Edit `config.py` to change:
 
 - Default reporting period
-- Draft sender name/email
 - Subject line
 - Plain-text body
 - Signature details are in `email_sender.py`

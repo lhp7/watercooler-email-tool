@@ -296,11 +296,12 @@ if "eml_zip" in st.session_state:
         use_container_width=True,
     )
     st.info(
-        "**How to load these into Outlook Drafts:**\n\n"
-        "1. Unzip the downloaded file\n"
-        "2. Select all the `.eml` files (Ctrl+A)\n"
-        "3. Drag and drop them into your Outlook Drafts folder\n\n"
-        "Each file is marked as an unsent draft, so it should open with a Send button and the correct recipient, subject, body, logo, and attachment."
+        "**Load the drafts into the mailbox you will send from:**\n\n"
+        "**Classic Outlook:** Unzip the download, select all `.eml` files, and drag them into that mailbox's Drafts folder.\n\n"
+        "**New Outlook:** Unzip the download, then go to Settings → Files → Import → Start import. "
+        "Choose the extracted folder, the destination account, and its Drafts folder.\n\n"
+        "The files intentionally contain no fixed From address. Outlook should use the account that owns the destination Drafts folder. "
+        "Open one imported draft first and confirm its From account before sending the batch."
     )
 
 if "draft_log" in st.session_state:

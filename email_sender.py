@@ -19,8 +19,6 @@ import pandas as pd
 
 from config import (
     DEFAULT_PERIOD,
-    DRAFT_SENDER_EMAIL,
-    DRAFT_SENDER_NAME,
     MATCH_THRESHOLD,
     MAX_RECIPIENTS,
     SUBJECT_TEMPLATE,
@@ -32,6 +30,7 @@ REQUIRED_COLUMNS = ["first_name", "email", "org_name"]
 OUTPUT_COLUMNS = ["first_name", "last_name", "recipient_name", "email", "org_name", "contact_title"]
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SIGNATURE_LOGO_PATH = Path(__file__).with_name("signature_logo.png")
+SIGNATURE_LOGO_WIDTH = 56
 SIGNATURE_WEBSITE_URL = "http://dallasfoundation.org/"
 SIGNATURE_LINKEDIN_URL = "https://www.linkedin.com/in/erik-moss-a636125b/"
 
@@ -292,8 +291,8 @@ def render_signature_html(logo_cid: str | None = None) -> str:
     logo_html = ""
     if logo_uri:
         logo_html = (
-            f'<img src="{logo_uri}" alt="The Dallas Foundation" width="92" '
-            'style="display:block;width:92px;height:auto;border:0;outline:none;text-decoration:none;">'
+            f'<img src="{logo_uri}" alt="The Dallas Foundation" width="{SIGNATURE_LOGO_WIDTH}" '
+            f'style="display:block;width:{SIGNATURE_LOGO_WIDTH}px;height:auto;border:0;outline:none;text-decoration:none;">'
         )
 
     return f"""
@@ -364,8 +363,6 @@ def _logo_bytes() -> bytes | None:
 
 
 def build_eml_message(
-    sender_email: str,
-    sender_name: str,
     recipient_email: str,
     recipient_name: str,
     subject: str,
@@ -377,7 +374,9 @@ def build_eml_message(
 ) -> EmailMessage:
     message = EmailMessage(policy=SMTP)
     message["X-Unsent"] = "1"
-    message["From"] = _format_email_header(sender_name, sender_email)
+    # Deliberately omit From/Sender. A portable draft cannot know which Outlook
+    # account will own it; Outlook assigns the sending account when the draft is
+    # imported into that account's Drafts folder.
     message["To"] = _format_email_header(recipient_name, recipient_email)
     if cc and cc.strip():
         message["Cc"] = _format_address_list(cc)
@@ -439,8 +438,6 @@ def generate_eml_zip(
     edited_rows: pd.DataFrame,
     reports: list[ReportFile],
     period: str,
-    sender_email: str = DRAFT_SENDER_EMAIL,
-    sender_name: str = DRAFT_SENDER_NAME,
 ) -> tuple[bytes, pd.DataFrame]:
     report_lookup = {report.filename: report for report in reports}
     log_rows = []
@@ -455,8 +452,6 @@ def generate_eml_zip(
             body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
             attachment_name = format_attachment_filename(row["org_name"], period)
             message = build_eml_message(
-                sender_email=sender_email,
-                sender_name=sender_name,
                 recipient_email=row["email"],
                 recipient_name=row["recipient_name"],
                 subject=row["subject"],

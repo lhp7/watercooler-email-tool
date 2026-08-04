@@ -20,9 +20,6 @@ BRAND_COLORS = {
     "line": "#D9E7EC",
 }
 
-DRAFT_SENDER_NAME = "Erik Moss"
-DRAFT_SENDER_EMAIL = "erik@watercooler.org"
-
 SUBJECT_TEMPLATE = "Your Pegasus Park Campus Engagement Report - {period}"
 
 TEXT_TEMPLATE = """Hi {first_name},
