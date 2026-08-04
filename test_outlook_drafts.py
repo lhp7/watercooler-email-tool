@@ -9,15 +9,23 @@ from zipfile import ZipFile
 import pandas as pd
 
 import email_sender
-from email_sender import ReportFile, build_eml_message, generate_eml_zip, render_signature_html
+from email_sender import ReportFile, build_eml_message, generate_eml_zip, render_signature_html, render_subject
 
 
 class OutlookDraftTests(unittest.TestCase):
-    def test_signature_logo_is_small_in_attribute_and_inline_style(self):
+    def test_default_subject_uses_requested_colon_format(self):
+        subject = render_subject("Jane", "Example", "January - June 2026")
+
+        self.assertEqual(subject, "Your Pegasus Park Campus Engagement Report: January - June 2026")
+
+    def test_signature_matches_compact_reference_dimensions(self):
         html = render_signature_html(logo_cid="logo@example")
 
-        self.assertIn('width="56"', html)
-        self.assertIn("width:56px", html)
+        self.assertIn('width="44"', html)
+        self.assertIn("width:44px", html)
+        self.assertIn("font-size:15px", html)
+        self.assertIn("font-size:13px", html)
+        self.assertEqual(html.count("font-size:11px"), 4)
 
     def test_eml_is_unsent_mailbox_neutral_and_complete(self):
         with patch.object(email_sender, "_logo_bytes", return_value=b"mime-test-logo"):
@@ -44,7 +52,7 @@ class OutlookDraftTests(unittest.TestCase):
 
         html_parts = [part for part in parsed.walk() if part.get_content_type() == "text/html"]
         self.assertEqual(len(html_parts), 1)
-        self.assertIn('width="56"', html_parts[0].get_content())
+        self.assertIn('width="44"', html_parts[0].get_content())
         related_images = [part for part in parsed.walk() if part.get_content_maintype() == "image"]
         self.assertEqual(len(related_images), 1)
         self.assertEqual(related_images[0].get_content_disposition(), "inline")

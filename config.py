@@ -20,7 +20,7 @@ BRAND_COLORS = {
     "line": "#D9E7EC",
 }
 
-SUBJECT_TEMPLATE = "Your Pegasus Park Campus Engagement Report - {period}"
+SUBJECT_TEMPLATE = "Your Pegasus Park Campus Engagement Report: {period}"
 
 TEXT_TEMPLATE = """Hi {first_name},
 

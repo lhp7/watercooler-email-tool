@@ -30,7 +30,7 @@ REQUIRED_COLUMNS = ["first_name", "email", "org_name"]
 OUTPUT_COLUMNS = ["first_name", "last_name", "recipient_name", "email", "org_name", "contact_title"]
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 SIGNATURE_LOGO_PATH = Path(__file__).with_name("signature_logo.png")
-SIGNATURE_LOGO_WIDTH = 56
+SIGNATURE_LOGO_WIDTH = 44
 SIGNATURE_WEBSITE_URL = "http://dallasfoundation.org/"
 SIGNATURE_LINKEDIN_URL = "https://www.linkedin.com/in/erik-moss-a636125b/"
 
@@ -296,20 +296,20 @@ def render_signature_html(logo_cid: str | None = None) -> str:
         )
 
     return f"""
-<div style="margin-top:24px;font-family:Georgia,'Times New Roman',serif;color:#6f6f6f;line-height:1.35;">
-  <div style="margin:0 0 28px 0;">{logo_html}</div>
-  <div style="font-size:19px;font-weight:700;color:#4a4a4a;margin-bottom:3px;">Erik Moss</div>
-  <div style="font-size:17px;color:#7a7a7a;margin-bottom:28px;">Director of the Water Cooler at Pegasus Park</div>
-  <div style="font-size:14px;color:#777777;margin-bottom:10px;">
+<div style="margin-top:18px;font-family:Georgia,'Times New Roman',serif;color:#6f6f6f;line-height:1.3;">
+  <div style="margin:0 0 18px 0;">{logo_html}</div>
+  <div style="font-size:15px;font-weight:700;color:#4a4a4a;margin-bottom:2px;">Erik Moss</div>
+  <div style="font-size:13px;color:#7a7a7a;margin-bottom:20px;">Director of the Water Cooler at Pegasus Park</div>
+  <div style="font-size:11px;color:#777777;margin-bottom:7px;">
     3000 Pegasus Park Drive. #930&nbsp;&nbsp;|&nbsp;&nbsp;Dallas, TX 75247
   </div>
-  <div style="font-size:14px;color:#777777;margin-bottom:10px;">
+  <div style="font-size:11px;color:#777777;margin-bottom:7px;">
     <strong style="color:#626262;">P:</strong> 214-694-2529&nbsp;&nbsp;|&nbsp;&nbsp;<strong style="color:#626262;">C:</strong> 817-987-9945
   </div>
-  <div style="font-size:14px;margin-bottom:8px;">
+  <div style="font-size:11px;margin-bottom:6px;">
     <a href="{SIGNATURE_WEBSITE_URL}" style="color:#0000EE;text-decoration:underline;">dallasfoundation.org</a>
   </div>
-  <div style="font-size:14px;">
+  <div style="font-size:11px;">
     <a href="{SIGNATURE_LINKEDIN_URL}" style="color:#0000EE;text-decoration:underline;">{SIGNATURE_LINKEDIN_URL}</a>
   </div>
 </div>
@@ -473,4 +473,3 @@ def log_to_csv(log_df: pd.DataFrame) -> bytes:
     output = StringIO()
     log_df.to_csv(output, index=False)
     return output.getvalue().encode("utf-8")
-
