@@ -5,7 +5,14 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from config import BRAND_COLORS, DEFAULT_OUTLOOK_MAILBOX, DEFAULT_PERIOD, MAX_RECIPIENTS
+from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS
+
+try:
+    from config import DEFAULT_OUTLOOK_MAILBOX
+except ImportError:
+    # Keep the app available during a Streamlit hot reload where app.py may
+    # refresh before the matching config.py module is reloaded.
+    DEFAULT_OUTLOOK_MAILBOX = "lhp7@lhholdings.net"
 from email_sender import (
     build_match_table,
     extract_reports_from_zip,
