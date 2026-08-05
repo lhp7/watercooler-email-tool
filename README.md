@@ -10,10 +10,12 @@ Standalone Streamlit app for preparing Water Cooler at Pegasus Park engagement r
 - Shows a full editable preview of every email before any draft file is built.
 - Shows a downloadable link to the exact PDF attached to each draft.
 - Adds Erik Moss's Water Cooler signature and logo to every email draft.
-- Generates Outlook-compatible `.eml` draft files with the correct PDF attached.
-- Marks each draft with `X-Unsent: 1` so Outlook opens it as an unsent email with a Send button.
-- Leaves the `From` header unset so Outlook can use the mailbox that owns the destination Drafts folder.
-- Writes each Outlook recipient as `Name <email address>` so the To field includes the actual email address.
+- Generates a Windows importer package with recipients, HTML bodies, signatures, and PDFs.
+- Uses the signed-in Classic Outlook account to create real `IPM.Note` items directly in its Drafts folder.
+- Sets `SendUsingAccount` to the configured mailbox so the drafts send from the intended Outlook account.
+- Prevents duplicate imports when the same package is run again.
+- Creates drafts only; the importer contains no send operation.
+- Native drafts sync to New Outlook and Outlook on the web after Exchange synchronization.
 - Produces a downloadable draft log CSV.
 
 ## Files
@@ -25,6 +27,8 @@ watercooler_email_tool/
   config.py
   requirements.txt
   README.md
+  Create Outlook Drafts.ps1
+  START HERE - Create Outlook Drafts.cmd
   signature_logo.png
   sample_ceo_contacts.csv
 ```
@@ -69,11 +73,14 @@ Sarah,Johnson,sarah@orgname.org,Texas Trees Foundation
 3. Review the matching table and fix any organization names without a matched PDF.
 4. Open the attached PDF link for each recipient and edit the full subject/body if needed.
 5. Check the final review box.
-6. Click `Build reviewed email draft ZIP`.
-7. Download the ZIP and unzip it.
-8. In classic Outlook, select all `.eml` files and drag them into the sending mailbox's Drafts folder.
-9. In new Outlook, use `Settings > Files > Import`, select the extracted folder, then choose the destination account and its Drafts folder.
-10. Open one imported draft and confirm the From account, recipient, subject, body, logo, and attachment before sending the batch.
+6. Confirm the `Outlook sending mailbox` shown in the sidebar.
+7. Click `Build native Outlook draft package`.
+8. Download and fully extract the ZIP.
+9. Close New Outlook and open Classic Outlook on Windows with the target mailbox signed in.
+10. Double-click `START HERE - Create Outlook Drafts.cmd`.
+11. Confirm the displayed mailbox, type `CREATE`, and wait for `Finished`.
+12. Open one native draft and confirm From, To, subject, body, signature, and PDF attachment.
+13. Send the drafts individually. They also synchronize to New Outlook and Outlook on the web.
 
 ## Signature
 
@@ -89,8 +96,9 @@ Keep `signature_logo.png` in the same folder as `app.py` and `email_sender.py`.
 
 - No draft is generated unless it has a matched PDF report.
 - Rows below the match threshold show `No match found` and are blocked.
-- Erik must check the final review box before the draft ZIP can be generated.
-- This app does not send emails automatically and does not require email account setup.
+- Erik must check the final review box before the draft package can be generated.
+- The local importer requires Classic Outlook for Windows and a signed-in target account.
+- The app and importer do not send emails automatically.
 
 ## Editing the Email Template
 

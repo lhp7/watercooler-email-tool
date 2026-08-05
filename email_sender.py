@@ -4,12 +4,11 @@ from __future__ import annotations
 
 import base64
 import html
+import json
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from email.message import EmailMessage
-from email.policy import SMTP
-from email.utils import formataddr, make_msgid
 from io import BytesIO, StringIO
 from pathlib import Path
 from typing import Iterable
@@ -33,6 +32,9 @@ SIGNATURE_LOGO_PATH = Path(__file__).with_name("signature_logo.png")
 SIGNATURE_LOGO_WIDTH = 44
 SIGNATURE_WEBSITE_URL = "http://dallasfoundation.org/"
 SIGNATURE_LINKEDIN_URL = "https://www.linkedin.com/in/erik-moss-a636125b/"
+OUTLOOK_IMPORTER_SCRIPT_PATH = Path(__file__).with_name("Create Outlook Drafts.ps1")
+OUTLOOK_IMPORTER_LAUNCHER_PATH = Path(__file__).with_name("START HERE - Create Outlook Drafts.cmd")
+OUTLOOK_LOGO_CONTENT_ID = "water-cooler-signature-logo"
 
 CONTACT_COLUMN_ALIASES = {
     "primary contact": "recipient_name",
@@ -348,65 +350,10 @@ def _format_display_address(display_name: str, email_address: str) -> str:
     return f"{name} <{email}>"
 
 
-def _format_email_header(display_name: str, email_address: str) -> str:
-    return formataddr((str(display_name or "").strip(), str(email_address or "").strip()))
-
-
-def _format_address_list(addresses: str) -> str:
-    return ", ".join(formataddr((addr, addr)) for addr in _split_addresses(addresses))
-
-
 def _logo_bytes() -> bytes | None:
     if not SIGNATURE_LOGO_PATH.exists():
         return None
     return SIGNATURE_LOGO_PATH.read_bytes()
-
-
-def build_eml_message(
-    recipient_email: str,
-    recipient_name: str,
-    subject: str,
-    body: str,
-    attachment_filename: str,
-    attachment_content: bytes,
-    cc: str = "",
-    bcc: str = "",
-) -> EmailMessage:
-    message = EmailMessage(policy=SMTP)
-    message["X-Unsent"] = "1"
-    # Deliberately omit From/Sender. A portable draft cannot know which Outlook
-    # account will own it; Outlook assigns the sending account when the draft is
-    # imported into that account's Drafts folder.
-    message["To"] = _format_email_header(recipient_name, recipient_email)
-    if cc and cc.strip():
-        message["Cc"] = _format_address_list(cc)
-    if bcc and bcc.strip():
-        message["Bcc"] = _format_address_list(bcc)
-    message["Subject"] = subject
-
-    logo_content = _logo_bytes()
-    logo_cid = make_msgid(domain="watercooler.local")[1:-1] if logo_content else None
-    message.set_content(build_email_text(body), charset="utf-8")
-    message.add_alternative(build_email_html(body, logo_cid=logo_cid), subtype="html", charset="utf-8")
-
-    if logo_content and logo_cid:
-        html_part = message.get_payload()[1]
-        html_part.add_related(
-            logo_content,
-            maintype="image",
-            subtype="png",
-            cid=f"<{logo_cid}>",
-            filename="signature_logo.png",
-            disposition="inline",
-        )
-
-    message.add_attachment(
-        attachment_content,
-        maintype="application",
-        subtype="pdf",
-        filename=attachment_filename,
-    )
-    return message
 
 
 def _timestamp() -> str:
@@ -434,38 +381,114 @@ def rows_to_generate(edited_rows: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def generate_eml_zip(
+def _outlook_package_instructions(target_mailbox: str, draft_count: int) -> str:
+    return f"""WATER COOLER OUTLOOK DRAFT PACKAGE
+
+This package contains {draft_count} reviewed email draft(s) for:
+{target_mailbox}
+
+IMPORTANT
+- This importer creates drafts only. It never sends email.
+- Run it on the Windows computer that has Classic Outlook installed.
+- Classic Outlook must already be signed into {target_mailbox}.
+- Keep every extracted file and folder together.
+
+STEPS
+1. Extract this entire ZIP to a normal folder.
+2. Close New Outlook and open Classic Outlook.
+3. Double-click: START HERE - Create Outlook Drafts.cmd
+4. Confirm that the displayed mailbox is {target_mailbox}.
+5. Type CREATE and press Enter.
+6. Wait for the Finished message.
+7. Open Drafts under {target_mailbox} and inspect one email.
+8. Confirm From, To, subject, body, signature, and PDF attachment.
+9. Send the drafts individually when ready.
+
+The drafts are native Outlook items. After Outlook syncs, they will also
+appear in New Outlook and Outlook on the web.
+
+If the importer is run again, it skips drafts that it already created from
+this package. A CSV log is written beside the importer.
+"""
+
+
+def generate_native_outlook_package(
     edited_rows: pd.DataFrame,
     reports: list[ReportFile],
     period: str,
+    target_mailbox: str,
 ) -> tuple[bytes, pd.DataFrame]:
+    """Build a Windows package that creates native drafts through Outlook COM."""
+    mailbox = str(target_mailbox or "").strip().lower()
+    if not EMAIL_PATTERN.match(mailbox):
+        raise ValueError("Enter a valid Outlook sending mailbox before building drafts.")
+    if not OUTLOOK_IMPORTER_SCRIPT_PATH.exists() or not OUTLOOK_IMPORTER_LAUNCHER_PATH.exists():
+        raise RuntimeError("The Outlook importer files are missing from the app deployment.")
+
+    selected_rows = rows_to_generate(edited_rows)
     report_lookup = {report.filename: report for report in reports}
+    batch_id = uuid.uuid4().hex
+    logo_content = _logo_bytes()
+    manifest_drafts = []
     log_rows = []
     output = BytesIO()
+
     with ZipFile(output, "w", ZIP_DEFLATED) as zip_file:
-        for _, row in rows_to_generate(edited_rows).iterrows():
+        for draft_number, (_, row) in enumerate(selected_rows.iterrows(), start=1):
             row_dict = row.to_dict()
             report = report_lookup.get(row["matched_report"])
             if report is None:
                 log_rows.append(build_log_row(row_dict, "", "Skipped - missing report"))
                 continue
+
             body = row.get("body") or render_text_body(row["first_name"], row["org_name"], period)
             attachment_name = format_attachment_filename(row["org_name"], period)
-            message = build_eml_message(
-                recipient_email=row["email"],
-                recipient_name=row["recipient_name"],
-                subject=row["subject"],
-                body=body,
-                attachment_filename=attachment_name,
-                attachment_content=report.content,
-                cc=row.get("cc", ""),
-                bcc=row.get("bcc", ""),
+            org_slug = normalize_org_name(row["org_name"]).replace(" ", "_") or "organization"
+            attachment_path = f"attachments/{draft_number:03d}_{org_slug}.pdf"
+            html_body = build_email_html(
+                body,
+                logo_cid=OUTLOOK_LOGO_CONTENT_ID if logo_content else None,
             )
-            org_slug = normalize_org_name(row["org_name"]).replace(" ", "_")
-            name_slug = normalize_org_name(row["recipient_name"]).replace(" ", "_")
-            filename = f"{org_slug}_{name_slug}.eml"
-            zip_file.writestr(filename, message.as_bytes(policy=SMTP))
-            log_rows.append(build_log_row(row_dict, report.filename, "Draft generated"))
+            manifest_drafts.append(
+                {
+                    "draft_key": f"{batch_id}:{draft_number}",
+                    "recipient_name": str(row["recipient_name"]),
+                    "to": str(row["email"]).strip(),
+                    "cc": _split_addresses(str(row.get("cc", ""))),
+                    "bcc": _split_addresses(str(row.get("bcc", ""))),
+                    "subject": str(row["subject"]),
+                    "html_body": f"<html><body>{html_body}</body></html>",
+                    "attachment": attachment_path,
+                    "attachment_display_name": attachment_name,
+                }
+            )
+            zip_file.writestr(attachment_path, report.content)
+            log_rows.append(build_log_row(row_dict, report.filename, "Packaged for native Outlook import"))
+
+        manifest = {
+            "version": 1,
+            "batch_id": batch_id,
+            "created_at": datetime.now().isoformat(timespec="seconds"),
+            "target_mailbox": mailbox,
+            "draft_count": len(manifest_drafts),
+            "drafts": manifest_drafts,
+        }
+        zip_file.writestr("drafts.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        zip_file.writestr(
+            "START HERE - Create Outlook Drafts.cmd",
+            OUTLOOK_IMPORTER_LAUNCHER_PATH.read_bytes(),
+        )
+        zip_file.writestr(
+            "Create Outlook Drafts.ps1",
+            OUTLOOK_IMPORTER_SCRIPT_PATH.read_bytes(),
+        )
+        zip_file.writestr(
+            "README - How to Create Outlook Drafts.txt",
+            _outlook_package_instructions(mailbox, len(manifest_drafts)),
+        )
+        if logo_content:
+            zip_file.writestr("signature_logo.png", logo_content)
+
     return output.getvalue(), pd.DataFrame(log_rows)
 
 

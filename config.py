@@ -5,6 +5,7 @@ from __future__ import annotations
 MAX_RECIPIENTS = 50
 MATCH_THRESHOLD = 82
 DEFAULT_PERIOD = "January - June 2026"
+DEFAULT_OUTLOOK_MAILBOX = "lhp7@lhholdings.net"
 
 BRAND_COLORS = {
     "navy": "#153E5C",

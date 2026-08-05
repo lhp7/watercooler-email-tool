@@ -1,15 +1,18 @@
 import io
+import json
 import unittest
-from email import policy
-from email.parser import BytesParser
-from pathlib import Path
 from unittest.mock import patch
 from zipfile import ZipFile
 
 import pandas as pd
 
 import email_sender
-from email_sender import ReportFile, build_eml_message, generate_eml_zip, render_signature_html, render_subject
+from email_sender import (
+    ReportFile,
+    generate_native_outlook_package,
+    render_signature_html,
+    render_subject,
+)
 
 
 class OutlookDraftTests(unittest.TestCase):
@@ -27,43 +30,13 @@ class OutlookDraftTests(unittest.TestCase):
         self.assertIn("font-size:13px", html)
         self.assertEqual(html.count("font-size:11px"), 4)
 
-    def test_eml_is_unsent_mailbox_neutral_and_complete(self):
-        with patch.object(email_sender, "_logo_bytes", return_value=b"mime-test-logo"):
-            message = build_eml_message(
-                recipient_email="jane@example.org",
-                recipient_name="Jane Doe",
-                subject="Campus engagement report",
-                body="Hi Jane,\n\nPlease review the attached report.",
-                attachment_filename="Example Report.pdf",
-                attachment_content=b"%PDF-test",
-            )
-
-        parsed = BytesParser(policy=policy.default).parsebytes(message.as_bytes())
-        self.assertEqual(parsed["X-Unsent"], "1")
-        self.assertIsNone(parsed["From"])
-        self.assertIsNone(parsed["Sender"])
-        self.assertEqual(parsed["To"].addresses[0].addr_spec, "jane@example.org")
-        self.assertEqual(parsed["Subject"], "Campus engagement report")
-
-        attachments = list(parsed.iter_attachments())
-        self.assertEqual(len(attachments), 1)
-        self.assertEqual(attachments[0].get_filename(), "Example Report.pdf")
-        self.assertEqual(attachments[0].get_payload(decode=True), b"%PDF-test")
-
-        html_parts = [part for part in parsed.walk() if part.get_content_type() == "text/html"]
-        self.assertEqual(len(html_parts), 1)
-        self.assertIn('width="44"', html_parts[0].get_content())
-        related_images = [part for part in parsed.walk() if part.get_content_maintype() == "image"]
-        self.assertEqual(len(related_images), 1)
-        self.assertEqual(related_images[0].get_content_disposition(), "inline")
-
-    def test_zip_contains_parseable_draft_with_normal_headers(self):
+    def test_native_package_contains_safe_importer_manifest_and_pdf(self):
         reports = [
             ReportFile(
                 filename="Example.pdf",
                 display_name="Example",
                 normalized_name="example",
-                content=b"%PDF-test",
+                content=b"%PDF-native-test",
             )
         ]
         rows = pd.DataFrame(
@@ -78,27 +51,54 @@ class OutlookDraftTests(unittest.TestCase):
                     "org_name": "Example",
                     "matched_report": "Example.pdf",
                     "match_score": 100,
-                    "subject": "Normal subject",
+                    "subject": "Your Pegasus Park Campus Engagement Report: January - June 2026",
                     "body": "Normal body",
-                    "cc": "",
+                    "cc": "copy@example.org",
                     "bcc": "",
                 }
             ]
         )
 
-        with patch.object(email_sender, "SIGNATURE_LOGO_PATH", Path("missing-logo.png")):
-            archive, log = generate_eml_zip(rows, reports, "January - June 2026")
+        with patch.object(email_sender, "_logo_bytes", return_value=b"test-logo"):
+            archive, log = generate_native_outlook_package(
+                rows,
+                reports,
+                "January - June 2026",
+                "lhp7@lhholdings.net",
+            )
 
-        with ZipFile(io.BytesIO(archive)) as drafts:
-            names = drafts.namelist()
-            self.assertEqual(len(names), 1)
-            self.assertTrue(names[0].endswith(".eml"))
-            parsed = BytesParser(policy=policy.default).parsebytes(drafts.read(names[0]))
+        with ZipFile(io.BytesIO(archive)) as package:
+            names = package.namelist()
+            manifest = json.loads(package.read("drafts.json"))
+            script = package.read("Create Outlook Drafts.ps1").decode("utf-8")
+            pdf_path = manifest["drafts"][0]["attachment"]
 
-        self.assertEqual(parsed["To"].addresses[0].display_name, "Jane Doe")
-        self.assertEqual(parsed["Subject"], "Normal subject")
-        self.assertIsNone(parsed["From"])
-        self.assertEqual(log.iloc[0]["Status"], "Draft generated")
+            self.assertIn("START HERE - Create Outlook Drafts.cmd", names)
+            self.assertIn("README - How to Create Outlook Drafts.txt", names)
+            self.assertIn("signature_logo.png", names)
+            self.assertIn(pdf_path, names)
+            self.assertNotIn(".eml", " ".join(names))
+            self.assertEqual(package.read(pdf_path), b"%PDF-native-test")
+
+        self.assertEqual(manifest["target_mailbox"], "lhp7@lhholdings.net")
+        self.assertEqual(manifest["draft_count"], 1)
+        self.assertEqual(manifest["drafts"][0]["to"], "jane@example.org")
+        self.assertEqual(manifest["drafts"][0]["cc"], ["copy@example.org"])
+        self.assertIn("cid:water-cooler-signature-logo", manifest["drafts"][0]["html_body"])
+        self.assertIn('$draftsFolder.Items.Add($olMailItem)', script)
+        self.assertIn('$message.SendUsingAccount = $account', script)
+        self.assertNotIn("$message.Send()", script)
+        self.assertNotIn(".Send()", script)
+        self.assertEqual(log.iloc[0]["Status"], "Packaged for native Outlook import")
+
+    def test_native_package_rejects_invalid_mailbox(self):
+        with self.assertRaisesRegex(ValueError, "valid Outlook sending mailbox"):
+            generate_native_outlook_package(
+                pd.DataFrame(),
+                [],
+                "January - June 2026",
+                "not-an-email",
+            )
 
 
 if __name__ == "__main__":

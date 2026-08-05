@@ -5,12 +5,12 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from config import BRAND_COLORS, DEFAULT_PERIOD, MAX_RECIPIENTS
+from config import BRAND_COLORS, DEFAULT_OUTLOOK_MAILBOX, DEFAULT_PERIOD, MAX_RECIPIENTS
 from email_sender import (
     build_match_table,
     extract_reports_from_zip,
     format_attachment_filename,
-    generate_eml_zip,
+    generate_native_outlook_package,
     log_to_csv,
     read_recipients_csv,
     render_signature_html,
@@ -97,6 +97,8 @@ with st.sidebar:
     st.header("Batch settings")
     period = st.text_input("Reporting period", value=DEFAULT_PERIOD)
     st.caption("This appears in the email subject and body.")
+    sending_mailbox = st.text_input("Outlook sending mailbox", value=DEFAULT_OUTLOOK_MAILBOX)
+    st.caption("Native drafts will be created in this signed-in Outlook account.")
 
 report_zip = st.file_uploader("Upload report ZIP from the keycard reporting app", type=["zip"])
 
@@ -117,7 +119,7 @@ if not reports:
 report_cols = st.columns(3)
 report_cols[0].metric("PDF reports found", len(reports))
 report_cols[1].metric("Max recipients", MAX_RECIPIENTS)
-report_cols[2].metric("Output", "Outlook .eml draft ZIP")
+report_cols[2].metric("Output", "Native Outlook draft package")
 
 st.subheader("Recipients")
 input_mode = st.radio("Recipient input method", ["Upload CEO contact file", "Manual entry"], horizontal=True)
@@ -280,28 +282,38 @@ st.caption(f"{len(selected_ready)} ready draft(s) selected.")
 
 confirm = st.checkbox("I reviewed every selected email and attachment.")
 build_disabled = selected_ready.empty or not confirm
-if st.button("Build reviewed email draft ZIP", use_container_width=True, disabled=build_disabled):
-    with st.spinner("Building Outlook draft files..."):
-        eml_zip, log_df = generate_eml_zip(edited, reports, period)
-    st.session_state["eml_zip"] = eml_zip
-    st.session_state["draft_log"] = log_df
-    st.success("Outlook draft files are ready to download.")
+if st.button("Build native Outlook draft package", use_container_width=True, disabled=build_disabled):
+    try:
+        with st.spinner("Building the native Outlook draft package..."):
+            draft_package, log_df = generate_native_outlook_package(
+                edited,
+                reports,
+                period,
+                sending_mailbox,
+            )
+        st.session_state["draft_package"] = draft_package
+        st.session_state["draft_log"] = log_df
+        st.success("The native Outlook draft package is ready to download.")
+    except Exception as exc:
+        st.error(f"Could not build the Outlook package: {exc}")
 
-if "eml_zip" in st.session_state:
+if "draft_package" in st.session_state:
     st.download_button(
-        "Download Outlook draft ZIP",
-        data=st.session_state["eml_zip"],
-        file_name="water_cooler_outlook_drafts.zip",
+        "Download native Outlook draft package",
+        data=st.session_state["draft_package"],
+        file_name="water_cooler_native_outlook_drafts.zip",
         mime="application/zip",
         use_container_width=True,
     )
     st.info(
-        "**Load the drafts into the mailbox you will send from:**\n\n"
-        "**Classic Outlook:** Unzip the download, select all `.eml` files, and drag them into that mailbox's Drafts folder.\n\n"
-        "**New Outlook:** Unzip the download, then go to Settings → Files → Import → Start import. "
-        "Choose the extracted folder, the destination account, and its Drafts folder.\n\n"
-        "The files intentionally contain no fixed From address. Outlook should use the account that owns the destination Drafts folder. "
-        "Open one imported draft first and confirm its From account before sending the batch."
+        "**Create the real Outlook drafts:**\n\n"
+        "1. Unzip the entire download\n"
+        "2. Close New Outlook and open Classic Outlook on Windows\n"
+        "3. Double-click `START HERE - Create Outlook Drafts.cmd`\n"
+        "4. Confirm the mailbox, type `CREATE`, and wait for `Finished`\n"
+        "5. Open one new draft and confirm From, To, subject, body, signature, and PDF\n\n"
+        "The importer creates drafts only and never sends email. "
+        "The native drafts will sync to New Outlook and Chrome Outlook."
     )
 
 if "draft_log" in st.session_state:
